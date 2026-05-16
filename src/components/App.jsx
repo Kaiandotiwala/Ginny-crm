@@ -2,39 +2,55 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase, fetchLeads, upsertLead, updateLeadStage, signOut } from '../lib/supabase'
 import InviteManager from './InviteManager'
 
-// ── Constants ─────────────────────────────────────────────────
+// ── Brand ─────────────────────────────────────────────────────
+const BK = '#1e1e1e'
+const LIME = '#cbd952'
+const BG = '#f7f7f5'
+const WHITE = '#ffffff'
+const BORDER = '#e8e8e4'
+const MUTED = '#9ca3af'
+const TEXT = '#1f2937'
 
+// ── Constants ─────────────────────────────────────────────────
 const STAGES = [
-  { id: 'lead',        label: 'Lead',            color: '#6366f1', bg: '#eef2ff' },
-  { id: 'prospect',   label: 'Prospect',         color: '#f59e0b', bg: '#fffbeb' },
-  { id: 'quotation',  label: 'Quotation Sent',   color: '#3b82f6', bg: '#eff6ff' },
-  { id: 'negotiation',label: 'Negotiation',      color: '#8b5cf6', bg: '#f5f3ff' },
-  { id: 'sow_pending',label: 'SOW/SLA Pending',  color: '#ec4899', bg: '#fdf2f8' },
-  { id: 'onboarding', label: 'Onboarding',       color: '#10b981', bg: '#ecfdf5' },
-  { id: 'closed_won', label: 'Closed Won',       color: '#059669', bg: '#d1fae5' },
-  { id: 'closed_lost',label: 'Closed Lost',      color: '#ef4444', bg: '#fee2e2' },
+  { id: 'lead',        label: 'Lead',           color: '#6366f1', bg: '#eef2ff', emoji: '🌱' },
+  { id: 'prospect',   label: 'Prospect',        color: '#f59e0b', bg: '#fffbeb', emoji: '👀' },
+  { id: 'quotation',  label: 'Quotation Sent',  color: '#3b82f6', bg: '#eff6ff', emoji: '📄' },
+  { id: 'negotiation',label: 'Negotiation',     color: '#8b5cf6', bg: '#f5f3ff', emoji: '🤝' },
+  { id: 'sow_pending',label: 'SOW/SLA Pending', color: '#ec4899', bg: '#fdf2f8', emoji: '✍️' },
+  { id: 'onboarding', label: 'Onboarding',      color: '#10b981', bg: '#ecfdf5', emoji: '🚀' },
+  { id: 'closed_won', label: 'Closed Won',      color: '#059669', bg: '#d1fae5', emoji: '🏆' },
+  { id: 'closed_lost',label: 'Closed Lost',     color: '#ef4444', bg: '#fee2e2', emoji: '❌' },
+]
+
+const SERVICES = [
+  { id: 'social',   label: 'Social Media Management', emoji: '📱' },
+  { id: 'content',  label: 'Content Creation',        emoji: '✍️' },
+  { id: 'ads',      label: 'Paid Ads',                emoji: '📢' },
+  { id: 'seo',      label: 'SEO & Website',           emoji: '🔍' },
+  { id: 'branding', label: 'Branding & Design',       emoji: '🎨' },
+  { id: 'strategy', label: 'Strategy & Consulting',   emoji: '🎯' },
+  { id: 'pr',       label: 'PR & Communications',     emoji: '📣' },
 ]
 
 const TEAM = [
-  { id: 'you',      name: 'You (Head of Sales)', initials: 'YO' },
-  { id: 'founder2', name: 'Co-founder 2',        initials: 'CF' },
-  { id: 'founder3', name: 'Co-founder 3',        initials: 'C3' },
+  { id: 'you',      name: 'You (Head of Sales)' },
+  { id: 'founder2', name: 'Co-founder 2' },
+  { id: 'founder3', name: 'Co-founder 3' },
 ]
 
 const INDUSTRIES = ['Technology','Finance','Healthcare','Retail','Manufacturing','Real Estate','Education','Media','Consulting','Other']
-const SOURCES = ['LinkedIn','Referral','Conference','Cold Outreach','Website','WhatsApp','Other']
+const SOURCES    = ['LinkedIn','Referral','Conference','Cold Outreach','Website','WhatsApp','Other']
 
 // ── Helpers ───────────────────────────────────────────────────
-
-const fmtINR = v => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v || 0)
+const fmtINR  = v => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v || 0)
 const getStage = id => STAGES.find(s => s.id === id) || STAGES[0]
-const today = () => new Date().toISOString().split('T')[0]
+const today   = () => new Date().toISOString().split('T')[0]
 
-// ── Claude API helper ─────────────────────────────────────────
-
-async function callClaude(messages, systemPrompt, maxTokens = 1000) {
+// ── Claude API ────────────────────────────────────────────────
+async function callClaude(messages, system, maxTokens = 1000) {
   const body = { model: 'claude-sonnet-4-20250514', max_tokens: maxTokens, messages }
-  if (systemPrompt) body.system = systemPrompt
+  if (system) body.system = system
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -50,15 +66,95 @@ async function callClaude(messages, systemPrompt, maxTokens = 1000) {
   return data.content?.find(b => b.type === 'text')?.text || 'No response.'
 }
 
-// ── Small UI components ───────────────────────────────────────
+// ── Logo ──────────────────────────────────────────────────────
+const GinnyLogo = ({ size = 34 }) => (
+  <div style={{ width: size, height: size, background: LIME, borderRadius: Math.round(size * 0.24), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 22 20" fill="none">
+      <path d="M2 3C2 1.9 2.9 1 4 1H18C19.1 1 20 1.9 20 3V13C20 14.1 19.1 15 18 15H12L8 19V15H4C2.9 15 2 14.1 2 13V3Z" fill={BK} />
+    </svg>
+  </div>
+)
 
-const Avatar = ({ name = '?', size = 32 }) => {
-  const initials = String(name).split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
-  const colors = ['#6366f1','#f59e0b','#10b981','#ec4899','#3b82f6','#8b5cf6','#ef4444']
-  const bg = colors[(initials.charCodeAt(0) || 0) % colors.length]
+// ── Toast ─────────────────────────────────────────────────────
+function useToast() {
+  const [toasts, setToasts] = useState([])
+  const toast = useCallback((msg, type = 'info') => {
+    const id = Date.now()
+    setToasts(p => [...p, { id, msg, type }])
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3000)
+  }, [])
+  return { toasts, toast }
+}
+
+function ToastContainer({ toasts }) {
+  if (!toasts.length) return null
   return (
-    <div style={{ width: size, height: size, borderRadius: '50%', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: size * 0.36, fontWeight: 700, flexShrink: 0 }}>
-      {initials}
+    <div style={{ position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', pointerEvents: 'none' }}>
+      {toasts.map(t => (
+        <div key={t.id} style={{ background: t.type === 'error' ? '#ef4444' : BK, color: WHITE, padding: '10px 22px', borderRadius: 30, fontSize: 13, fontWeight: 500, boxShadow: '0 4px 24px rgba(0,0,0,0.25)', whiteSpace: 'nowrap', animation: 'toastIn 0.2s ease' }}>
+          {t.msg}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Confetti ──────────────────────────────────────────────────
+function Confetti({ onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 2600); return () => clearTimeout(t) }, [onDone])
+  const pieces = useRef(Array.from({ length: 64 }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    color: [LIME, WHITE, '#6366f1', '#f59e0b', '#10b981', '#ec4899'][i % 6],
+    size: 6 + Math.random() * 9,
+    delay: Math.random() * 0.6,
+    dur: 1.2 + Math.random() * 1,
+    rotate: Math.random() > 0.5,
+  }))).current
+  return (
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9998, overflow: 'hidden' }}>
+      {pieces.map(p => (
+        <div key={p.id} style={{
+          position: 'absolute', top: 0, left: `${p.x}%`,
+          width: p.size, height: p.size,
+          background: p.color,
+          borderRadius: p.rotate ? '50%' : 2,
+          animation: `confettiFall ${p.dur}s ${p.delay}s ease-in forwards`,
+        }} />
+      ))}
+    </div>
+  )
+}
+
+// ── Bottom Sheet ──────────────────────────────────────────────
+function Sheet({ children, onClose, title, maxWidth = 740 }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)' }} onClick={onClose} />
+      <div style={{ position: 'relative', background: WHITE, borderRadius: '22px 22px 0 0', width: '100%', maxWidth, margin: '0 auto', maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 -8px 48px rgba(0,0,0,0.2)', animation: 'sheetUp 0.26s cubic-bezier(0.32,0.72,0,1)' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '14px 0 6px' }}>
+          <div style={{ width: 42, height: 4, background: '#ddd', borderRadius: 4 }} />
+        </div>
+        {title && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 24px 0' }}>
+            <div style={{ fontWeight: 700, fontSize: 18, color: TEXT }}>{title}</div>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: MUTED, padding: 4 }}>✕</button>
+          </div>
+        )}
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ── Shared UI ─────────────────────────────────────────────────
+const Avatar = ({ name = '?', size = 32 }) => {
+  const init = String(name).split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  const cols = ['#6366f1','#f59e0b','#10b981','#ec4899','#3b82f6','#8b5cf6','#ef4444']
+  const bg = cols[(init.charCodeAt(0) || 0) % cols.length]
+  return (
+    <div style={{ width: size, height: size, borderRadius: '50%', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: WHITE, fontSize: size * 0.36, fontWeight: 700, flexShrink: 0 }}>
+      {init}
     </div>
   )
 }
@@ -69,203 +165,153 @@ const Badge = ({ label, color, bg }) => (
   </span>
 )
 
-const Overlay = ({ children, onClose }) => (
-  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-    onClick={e => e.target === e.currentTarget && onClose()}>
-    <div style={{ background: '#fff', borderRadius: 18, width: '100%', maxWidth: 660, maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.18)' }}>
-      {children}
-    </div>
-  </div>
-)
-
-const Tabs = ({ tabs, active, onChange }) => (
-  <div style={{ display: 'flex', gap: 2, borderBottom: '1.5px solid #e5e7eb', marginBottom: 20 }}>
+const SheetTabs = ({ tabs, active, onChange }) => (
+  <div style={{ display: 'flex', overflowX: 'auto', borderBottom: `1.5px solid ${BORDER}`, margin: '10px 0 0', padding: '0 24px' }}>
     {tabs.map(t => (
       <button key={t.id} onClick={() => onChange(t.id)}
-        style={{ padding: '10px 16px', fontSize: 13, fontWeight: active === t.id ? 600 : 400, color: active === t.id ? '#6366f1' : '#6b7280', borderBottom: active === t.id ? '2.5px solid #6366f1' : '2.5px solid transparent', background: 'none', border: 'none', borderBottomWidth: 2.5, borderBottomStyle: 'solid', cursor: 'pointer' }}>
+        style={{ padding: '10px 14px', fontSize: 13, fontWeight: active === t.id ? 600 : 400, color: active === t.id ? BK : MUTED, borderBottom: `2.5px solid ${active === t.id ? LIME : 'transparent'}`, background: 'none', border: 'none', borderBottomWidth: 2.5, borderBottomStyle: 'solid', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'Poppins, sans-serif' }}>
         {t.label}
       </button>
     ))}
   </div>
 )
 
-// ── AI Panel ──────────────────────────────────────────────────
-
+// ── AI Panel (full-screen) ────────────────────────────────────
 function AIPanel({ leads, user, onClose }) {
-  const [activeTab, setActiveTab] = useState('ask')
+  const [tab, setTab] = useState('ask')
   const [msgs, setMsgs] = useState([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [reportBusy, setReportBusy] = useState(null) // report id being generated
+  const [rBusy, setRBusy] = useState(null)
   const [reports, setReports] = useState({})
-  const initialAsked = useRef(false)
+  const did = useRef(false)
 
-  const systemPrompt = `You are a senior sales strategy advisor for Ginny. The user is Head of Sales & Strategy and one of 3 co-founders. Give sharp, actionable advice. Be direct and concise.
+  const sys = `You are a senior sales advisor for Ginny. User is Head of Sales & Strategy. Be sharp, direct, concise.
+Pipeline: ${leads.length} leads, active value ${fmtINR(leads.filter(l=>l.stage!=='closed_lost').reduce((s,l)=>s+(l.value||0),0))}
+Stages: ${STAGES.map(s=>`${s.label}:${leads.filter(l=>l.stage===s.id).length}`).join(', ')}
+Hot: ${leads.filter(l=>['negotiation','sow_pending'].includes(l.stage)).map(l=>`${l.company}(${fmtINR(l.value)})`).join(', ')||'none'}`
 
-Live pipeline:
-- Leads: ${leads.length} total
-- Pipeline value: ${fmtINR(leads.filter(l => l.stage !== 'closed_lost').reduce((s, l) => s + (l.value || 0), 0))}
-- By stage: ${STAGES.map(s => `${s.label}: ${leads.filter(l => l.stage === s.id).length}`).join(', ')}
-- Hot deals: ${leads.filter(l => ['negotiation','sow_pending'].includes(l.stage)).map(l => `${l.company} (${fmtINR(l.value)})`).join(', ') || 'none'}
-- Overdue reminders: ${leads.filter(l => l.reminder_date && l.reminder_date < today()).length}`
+  const ctx = `Pipeline ${today()}:\n${STAGES.map(s=>`${s.label}: ${leads.filter(l=>l.stage===s.id).length} deals — ${fmtINR(leads.filter(l=>l.stage===s.id).reduce((a,l)=>a+(l.value||0),0))}`).join('\n')}\n\nDeals:\n${leads.map(l=>`• ${l.company} | ${l.contact} | ${getStage(l.stage).label} | ${fmtINR(l.value)} | ${l.priority}`).join('\n')}`
 
-  const pipelineContext = `Live pipeline as of ${today()}:
-Total leads: ${leads.length}
-Active pipeline: ${fmtINR(leads.filter(l => l.stage !== 'closed_lost').reduce((s, l) => s + (l.value || 0), 0))}
-Closed Won: ${fmtINR(leads.filter(l => l.stage === 'closed_won').reduce((s, l) => s + (l.value || 0), 0))}
-
-Stage breakdown:
-${STAGES.map(s => `  ${s.label}: ${leads.filter(l => l.stage === s.id).length} deal(s) — ${fmtINR(leads.filter(l => l.stage === s.id).reduce((a, l) => a + (l.value || 0), 0))}`).join('\n')}
-
-All deals:
-${leads.map(l => `  • ${l.company} | ${l.contact} | Stage: ${getStage(l.stage).label} | Value: ${fmtINR(l.value)} | Priority: ${l.priority} | Source: ${l.source || '—'} | Industry: ${l.industry || '—'}${l.reminder_date ? ` | Reminder: ${l.reminder_date}` : ''}${l.notes ? ` | Notes: ${l.notes}` : ''}`).join('\n')}`
-
-  const REPORTS = [
-    {
-      id: 'weekly',
-      label: '📊 Weekly Sales Report',
-      prompt: `Generate a comprehensive Weekly Sales Report for Ginny (a digital marketing agency). Include: Executive Summary, Pipeline Snapshot, Stage-by-stage breakdown with values, Top 3 opportunities to prioritise, Deals at risk, Key actions for next week. Use clear headings and bullet points with specific INR numbers.\n\n${pipelineContext}`,
-    },
-    {
-      id: 'conversion',
-      label: '🔁 Conversion Analysis',
-      prompt: `Generate a detailed Conversion Analysis for Ginny's sales pipeline. Include: Stage-by-stage conversion rates, Biggest drop-off points, Average deal value per stage, Lead source effectiveness, Win/loss patterns based on available data, Top 5 specific recommendations to improve conversion. Be data-driven.\n\n${pipelineContext}`,
-    },
-    {
-      id: 'forecast',
-      label: '📈 Revenue Forecast',
-      prompt: `Generate a Revenue Forecast for Ginny. Include: 30/60/90-day revenue projections, Probability-weighted forecast (use: Quotation Sent=40%, Negotiation=65%, SOW Pending=80%, Onboarding=90%, Closed Won=100%), Best-case and conservative scenarios with INR totals, Top 3 deals most likely to close this month, Actions needed to hit best-case scenario.\n\n${pipelineContext}`,
-    },
-    {
-      id: 'coaching',
-      label: '🎯 Sales Coaching',
-      prompt: `Generate a Sales Coaching Report for Ginny's sales team. For each active deal provide: specific next action, recommended talk track or message, potential objection and how to handle it. Also include: Overall pipeline health assessment, Follow-up prioritisation order, Quick wins available right now, Deals to consider deprioritising. Be specific and actionable.\n\n${pipelineContext}`,
-    },
+  const RPTS = [
+    { id:'weekly',     label:'📊 Weekly Sales Report',  prompt:`Write a comprehensive Weekly Sales Report for Ginny (digital marketing agency). Sections: Executive Summary, Pipeline Snapshot, Stage breakdown with values, Top 3 opportunities, Deals at risk, Actions for next week.\n\n${ctx}` },
+    { id:'conversion', label:'🔁 Conversion Analysis',  prompt:`Write a Conversion Analysis for Ginny. Include stage conversion rates, drop-off points, avg deal value by stage, source effectiveness, 5 recommendations.\n\n${ctx}` },
+    { id:'forecast',   label:'📈 Revenue Forecast',     prompt:`Write a Revenue Forecast for Ginny. Include 30/60/90-day projections, probability-weighted forecast (Quotation=40%, Negotiation=65%, SOW=80%, Onboarding=90%, Won=100%), best-case and conservative scenarios in INR.\n\n${ctx}` },
+    { id:'coaching',   label:'🎯 Sales Coaching',       prompt:`Write a Sales Coaching Report for Ginny. Per deal: next action, talk track, objection handling. Also: quick wins, deals to drop, process improvements.\n\n${ctx}` },
   ]
 
-  // Fire the initial pipeline briefing once on mount
   useEffect(() => {
-    if (initialAsked.current) return
-    initialAsked.current = true
-    const initPrompt = 'Give me a sharp 3-point pipeline briefing: what needs immediate attention, what is at risk, and the #1 action I should take today to close more revenue.'
-    setMsgs([{ role: 'user', content: initPrompt }])
+    if (did.current) return
+    did.current = true
+    const p = 'Give me a sharp 3-point pipeline briefing: what needs immediate attention, what is at risk, and the #1 action I should take today.'
+    setMsgs([{ role: 'user', content: p }])
     setBusy(true)
-    callClaude([{ role: 'user', content: initPrompt }], systemPrompt)
-      .then(reply => setMsgs([{ role: 'user', content: initPrompt }, { role: 'assistant', content: reply }]))
-      .catch(() => setMsgs([{ role: 'user', content: initPrompt }, { role: 'assistant', content: 'Connection error — check your Anthropic API key in Vercel.' }]))
+    callClaude([{ role: 'user', content: p }], sys)
+      .then(r => setMsgs([{ role: 'user', content: p }, { role: 'assistant', content: r }]))
+      .catch(() => setMsgs([{ role: 'user', content: p }, { role: 'assistant', content: 'API error — check your Anthropic key in Vercel.' }]))
       .finally(() => setBusy(false))
-  }, []) // intentionally runs once; systemPrompt captured at mount is correct for initial brief
+  }, [])
 
   const ask = useCallback(async (prompt) => {
     if (!prompt.trim() || busy) return
     setBusy(true)
-    const newMsgs = [...msgs, { role: 'user', content: prompt }]
-    setMsgs(newMsgs)
-    setInput('')
+    const nm = [...msgs, { role: 'user', content: prompt }]
+    setMsgs(nm); setInput('')
     try {
-      const reply = await callClaude(newMsgs, systemPrompt)
-      setMsgs(prev => [...prev, { role: 'assistant', content: reply }])
-    } catch {
-      setMsgs(prev => [...prev, { role: 'assistant', content: 'Connection error — check your Anthropic API key.' }])
-    }
+      const r = await callClaude(nm, sys)
+      setMsgs(p => [...p, { role: 'assistant', content: r }])
+    } catch { setMsgs(p => [...p, { role: 'assistant', content: 'Connection error.' }]) }
     setBusy(false)
-  }, [msgs, systemPrompt, busy])
+  }, [msgs, sys, busy])
 
-  const generateReport = async (report) => {
-    setReportBusy(report.id)
+  const genReport = async (r) => {
+    setRBusy(r.id)
     try {
-      const text = await callClaude(
-        [{ role: 'user', content: report.prompt }],
-        'You are a senior sales analyst for Ginny, a digital marketing agency. Generate professional, structured reports with clear headings, specific numbers, and actionable recommendations.',
-        2000
-      )
-      setReports(prev => ({ ...prev, [report.id]: text }))
-    } catch {
-      setReports(prev => ({ ...prev, [report.id]: 'Error generating report — check your Anthropic API key in Vercel.' }))
-    }
-    setReportBusy(null)
+      const text = await callClaude([{ role: 'user', content: r.prompt }], 'You are a senior sales analyst for Ginny. Write professional structured reports.', 2000)
+      setReports(p => ({ ...p, [r.id]: text }))
+    } catch { setReports(p => ({ ...p, [r.id]: 'Error — check API key.' })) }
+    setRBusy(null)
   }
 
-  const quickPrompts = ['Draft follow-up for my hottest deal', 'Which leads are at risk of going cold?', 'Tips to shorten my SOW cycle']
+  const QP = ['Draft follow-up for hottest deal', 'Which leads are going cold?', 'Tips to shorten SOW cycle']
 
   return (
-    <Overlay onClose={onClose}>
-      <div style={{ padding: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20 }}>✦</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>Claude Sales Advisor</div>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>Reads your live pipeline · Powered by Claude Sonnet</div>
-          </div>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>✕</button>
+    <div style={{ position: 'fixed', inset: 0, background: BK, zIndex: 2000, display: 'flex', flexDirection: 'column', fontFamily: 'Poppins, sans-serif' }}>
+      {/* Header */}
+      <div style={{ padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid #2a2a2a', flexShrink: 0 }}>
+        <GinnyLogo size={34} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: WHITE }}>Claude Sales Advisor</div>
+          <div style={{ fontSize: 11, color: '#666' }}>Live pipeline · Claude Sonnet</div>
         </div>
+        <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: '50%', background: '#2a2a2a', border: 'none', color: WHITE, fontSize: 18, cursor: 'pointer' }}>✕</button>
+      </div>
 
-        <Tabs tabs={[{ id: 'ask', label: '✦ Ask AI' }, { id: 'reports', label: '📊 Reports' }]} active={activeTab} onChange={setActiveTab} />
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: '1px solid #2a2a2a', flexShrink: 0 }}>
+        {[{ id: 'ask', label: '✦ Ask AI' }, { id: 'reports', label: '📊 Reports' }].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ padding: '12px 24px', fontSize: 13, fontWeight: tab === t.id ? 600 : 400, color: tab === t.id ? LIME : '#666', borderBottom: `2px solid ${tab === t.id ? LIME : 'transparent'}`, background: 'none', border: 'none', borderBottomWidth: 2, borderBottomStyle: 'solid', cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-        {/* ── Ask AI tab ── */}
-        {activeTab === 'ask' && (
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+        {tab === 'ask' && (
           <>
-            <div style={{ background: '#f8f9ff', borderRadius: 12, padding: 16, minHeight: 200, maxHeight: 380, overflowY: 'auto', marginBottom: 14 }}>
-              {msgs.length === 0 && busy && <div style={{ color: '#6366f1', fontSize: 13 }}>Analyzing your pipeline...</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 200, marginBottom: 20 }}>
               {msgs.map((m, i) => (
-                <div key={i} style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: m.role === 'user' ? '#6366f1' : '#6b7280', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>
-                    {m.role === 'user' ? 'You' : '✦ Claude Advisor'}
+                <div key={i} style={{ display: 'flex', gap: 10, flexDirection: m.role === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-start' }}>
+                  <div style={{ width: 30, height: 30, borderRadius: '50%', background: m.role === 'user' ? LIME : '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0 }}>
+                    {m.role === 'user' ? '👤' : '✦'}
                   </div>
-                  <div style={{ fontSize: 13, color: '#1f2937', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                  <div style={{ maxWidth: '76%', background: m.role === 'user' ? LIME : '#1a1a1a', color: m.role === 'user' ? BK : WHITE, padding: '12px 16px', borderRadius: m.role === 'user' ? '14px 4px 14px 14px' : '4px 14px 14px 14px', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                    {m.content}
+                  </div>
                 </div>
               ))}
-              {busy && msgs.length > 0 && <div style={{ fontSize: 13, color: '#6366f1' }}>Thinking...</div>}
+              {busy && <div style={{ color: '#555', fontSize: 13, paddingLeft: 40 }}>✦ Thinking...</div>}
             </div>
-
-            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              {QP.map(q => (
+                <button key={q} onClick={() => ask(q)} style={{ padding: '6px 14px', border: '1px solid #333', borderRadius: 20, fontSize: 12, background: 'transparent', cursor: 'pointer', color: '#888', fontFamily: 'Poppins, sans-serif' }}>{q}</button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
               <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && ask(input)}
-                placeholder="Ask for advice, email drafts, deal tactics..."
-                style={{ flex: 1, padding: '10px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 13 }} />
+                placeholder="Ask anything about your pipeline..."
+                style={{ flex: 1, padding: '12px 16px', background: '#111', border: '1px solid #333', borderRadius: 12, fontSize: 13, color: WHITE, fontFamily: 'Poppins, sans-serif', outline: 'none' }} />
               <button onClick={() => ask(input)} disabled={busy || !input.trim()}
-                style={{ padding: '10px 18px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+                style={{ padding: '12px 22px', background: LIME, color: BK, border: 'none', borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: busy ? 0.6 : 1, fontFamily: 'Poppins, sans-serif' }}>
                 Send
               </button>
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {quickPrompts.map(q => (
-                <button key={q} onClick={() => ask(q)} style={{ padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 11, background: '#fff', cursor: 'pointer', color: '#6b7280' }}>{q}</button>
-              ))}
             </div>
           </>
         )}
 
-        {/* ── Reports tab ── */}
-        {activeTab === 'reports' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 500, overflowY: 'auto' }}>
-            {REPORTS.map(report => (
-              <div key={report.id} style={{ border: '1.5px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', padding: '13px 16px', gap: 10, background: '#fafafa' }}>
-                  <span style={{ flex: 1, fontWeight: 600, fontSize: 14, color: '#1f2937' }}>{report.label}</span>
-                  <button
-                    onClick={() => generateReport(report)}
-                    disabled={!!reportBusy}
-                    style={{ padding: '7px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: reportBusy ? 'not-allowed' : 'pointer', opacity: reportBusy === report.id ? 0.6 : 1, whiteSpace: 'nowrap' }}
-                  >
-                    {reportBusy === report.id ? 'Generating...' : reports[report.id] ? '↺ Regenerate' : 'Generate'}
+        {tab === 'reports' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {RPTS.map(r => (
+              <div key={r.id} style={{ border: '1px solid #2a2a2a', borderRadius: 14, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', gap: 12, background: '#111' }}>
+                  <span style={{ flex: 1, fontWeight: 600, fontSize: 14, color: WHITE }}>{r.label}</span>
+                  <button onClick={() => genReport(r)} disabled={!!rBusy}
+                    style={{ padding: '8px 16px', background: LIME, color: BK, border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: rBusy ? 'not-allowed' : 'pointer', opacity: rBusy === r.id ? 0.6 : 1, fontFamily: 'Poppins, sans-serif', whiteSpace: 'nowrap' }}>
+                    {rBusy === r.id ? 'Generating...' : reports[r.id] ? '↺ Redo' : 'Generate'}
                   </button>
                 </div>
-                {reports[report.id] && (
-                  <div style={{ padding: '14px 16px', borderTop: '1px solid #f3f4f6' }}>
-                    <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 260, overflowY: 'auto', marginBottom: 12 }}>
-                      {reports[report.id]}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <a
-                        href={`mailto:${user?.email || ''}?subject=${encodeURIComponent(`Ginny CRM — ${report.label} — ${today()}`)}&body=${encodeURIComponent(reports[report.id])}`}
-                        style={{ padding: '7px 14px', background: '#059669', color: '#fff', borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'inline-block' }}
-                      >
+                {reports[r.id] && (
+                  <div style={{ padding: '16px 18px', background: '#0d0d0d' }}>
+                    <div style={{ fontSize: 12, color: '#bbb', lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 260, overflowY: 'auto', marginBottom: 12 }}>{reports[r.id]}</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <a href={`mailto:${user?.email || ''}?subject=${encodeURIComponent(`Ginny — ${r.label} — ${today()}`)}&body=${encodeURIComponent(reports[r.id])}`}
+                        style={{ padding: '7px 16px', background: '#059669', color: WHITE, borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
                         ✉ Email to Me
                       </a>
-                      <button
-                        onClick={() => navigator.clipboard.writeText(reports[report.id])}
-                        style={{ padding: '7px 14px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 12, background: '#fff', cursor: 'pointer', color: '#374151' }}
-                      >
+                      <button onClick={() => navigator.clipboard.writeText(reports[r.id])}
+                        style={{ padding: '7px 14px', border: '1px solid #333', borderRadius: 8, fontSize: 12, background: 'transparent', cursor: 'pointer', color: '#bbb', fontFamily: 'Poppins, sans-serif' }}>
                         ⧉ Copy
                       </button>
                     </div>
@@ -276,127 +322,298 @@ ${leads.map(l => `  • ${l.company} | ${l.contact} | Stage: ${getStage(l.stage)
           </div>
         )}
       </div>
-    </Overlay>
+    </div>
   )
 }
 
-// ── Email Composer ────────────────────────────────────────────
+// ── Lead Detail (bottom sheet, 5 tabs) ────────────────────────
+function LeadDetail({ lead: init, leads, onClose, onEdit, onStageChange, onLogAction, toast }) {
+  const [tab, setTab] = useState('info')
+  const lead = leads.find(l => l.id === init.id) || init
+  const stage = getStage(lead.stage)
 
-function EmailComposer({ lead, type, onClose }) {
+  // Services local state
+  const [svc, setSvc] = useState(() => Object.fromEntries(
+    SERVICES.map(s => [s.id, {
+      enabled:   (lead.services || {})[s.id]?.enabled   || false,
+      price:     (lead.services || {})[s.id]?.price     || '',
+      frequency: (lead.services || {})[s.id]?.frequency || 'monthly',
+      notes:     (lead.services || {})[s.id]?.notes     || '',
+    }])
+  ))
+  const [savingSvc, setSavingSvc] = useState(false)
+  const svcTotal = SERVICES.reduce((sum, s) => sum + (svc[s.id]?.enabled ? (Number(svc[s.id]?.price) || 0) : 0), 0)
+
+  // Send tab
+  const [sendType, setSendType] = useState(null)
   const [draft, setDraft] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [draftBusy, setDraftBusy] = useState(false)
 
-  const labels = { quotation: 'Quotation Email', sow: 'SOW Signature Request', whatsapp: 'WhatsApp Follow-up', onboarding: 'Ops Team Introduction', followup: 'Follow-up Email' }
+  const SEND_OPTS = [
+    { type: 'quotation', label: '✉️ Draft Quotation Email' },
+    { type: 'sow',       label: '📝 Request SOW Signature' },
+    { type: 'whatsapp',  label: '💬 WhatsApp Follow-up' },
+    { type: 'onboarding',label: '🤝 Introduce Ops Team' },
+    { type: 'followup',  label: '↩ Draft Follow-up' },
+  ]
 
-  const prompts = {
-    quotation: `Write a professional sales quotation email for ${lead?.company}. Contact: ${lead?.contact}. Deal value: ${fmtINR(lead?.value)}. Sender is Ginny's Head of Sales. Warm but professional. Clear CTA to review call.`,
-    sow: `Write an email to ${lead?.contact} at ${lead?.company} requesting digital signature on our Scope of Work / SLA. Deal: ${fmtINR(lead?.value)}. Mention the document will arrive via DocuSign. Professional, reassuring tone.`,
-    whatsapp: `Write a WhatsApp message (under 120 words) to ${lead?.contact} from ${lead?.company}. Friendly follow-up on their quotation. Deal: ${fmtINR(lead?.value)}. Keep it human, not salesy.`,
-    onboarding: `Write a warm intro email introducing Ginny's operations team (co-founders) to ${lead?.contact} at ${lead?.company}. Express excitement about the partnership. Deal value: ${fmtINR(lead?.value)}. Professional and welcoming.`,
-    followup: `Write a follow-up email to ${lead?.contact} at ${lead?.company}. Stage: ${getStage(lead?.stage)?.label}. Value: ${fmtINR(lead?.value)}. Notes: ${lead?.notes || 'none'}. Warm, add gentle urgency.`,
+  const SEND_PROMPTS = {
+    quotation:  `Write a professional sales quotation email for ${lead.company}. Contact: ${lead.contact}. Deal value: ${fmtINR(lead.value)}. From Ginny's Head of Sales. Warm but professional. Clear CTA.`,
+    sow:        `Write an email to ${lead.contact} at ${lead.company} requesting signature on our Scope of Work / SLA. Deal: ${fmtINR(lead.value)}. Mention DocuSign. Professional, reassuring tone.`,
+    whatsapp:   `Write a WhatsApp message under 120 words to ${lead.contact} from ${lead.company}. Friendly follow-up on quotation. Deal: ${fmtINR(lead.value)}. Human, not salesy.`,
+    onboarding: `Write a warm intro email introducing Ginny's ops team to ${lead.contact} at ${lead.company}. Excited about the partnership. Deal: ${fmtINR(lead.value)}.`,
+    followup:   `Write a follow-up email to ${lead.contact} at ${lead.company}. Stage: ${stage.label}. Value: ${fmtINR(lead.value)}. Notes: ${lead.notes || 'none'}. Warm, gentle urgency.`,
   }
 
-  useEffect(() => { generate() }, [])
+  const generateDraft = async (type) => {
+    setSendType(type); setDraft(''); setDraftBusy(true)
+    try { setDraft(await callClaude([{ role: 'user', content: SEND_PROMPTS[type] }], undefined, 800)) }
+    catch { setDraft('Could not generate — check API key.') }
+    setDraftBusy(false)
+  }
 
-  const generate = async () => {
-    setBusy(true)
+  const saveServices = async () => {
+    setSavingSvc(true)
     try {
-      const text = await callClaude([{ role: 'user', content: prompts[type] }], undefined, 800)
-      setDraft(text)
-    } catch { setDraft('Could not generate draft. Check your Anthropic API key in Vercel.') }
-    setBusy(false)
+      const { error } = await upsertLead({ ...lead, services: svc })
+      if (error) throw error
+      toast('Services saved')
+    } catch { toast('Add a services column to Supabase to persist', 'error') }
+    setSavingSvc(false)
   }
+
+  const TABS = [
+    { id: 'info',     label: 'Info' },
+    { id: 'services', label: '💼 Services' },
+    { id: 'move',     label: '→ Stage' },
+    { id: 'send',     label: '✉ Send' },
+    { id: 'history',  label: 'History' },
+  ]
+
+  const priColor = { critical: '#ef4444', high: '#f59e0b', medium: '#3b82f6', low: MUTED }
+  const priBg    = { critical: '#fee2e2', high: '#fffbeb', medium: '#eff6ff', low: '#f9fafb' }
 
   return (
-    <Overlay onClose={onClose}>
-      <div style={{ padding: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <div style={{ fontSize: 26 }}>{type === 'whatsapp' ? '💬' : '✉️'}</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>{labels[type]}</div>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>{lead?.company} — {lead?.contact}</div>
+    <Sheet onClose={onClose}>
+      {/* Lead header */}
+      <div style={{ padding: '12px 24px 0', display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+        <Avatar name={lead.company} size={48} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 19, color: TEXT }}>{lead.company}</div>
+          <div style={{ fontSize: 13, color: MUTED }}>{lead.contact} · {lead.email}</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Badge label={stage.label} color={stage.color} bg={stage.bg} />
+            <Badge label={lead.priority} color={priColor[lead.priority] || MUTED} bg={priBg[lead.priority] || '#f9fafb'} />
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#059669' }}>{fmtINR(lead.value)}</span>
           </div>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>✕</button>
         </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: MUTED, padding: 4, flexShrink: 0 }}>✕</button>
+      </div>
 
-        {busy
-          ? <div style={{ textAlign: 'center', padding: '40px 0', color: '#6366f1', fontSize: 14 }}>Drafting your {labels[type]}...</div>
-          : <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={13}
-              style={{ width: '100%', padding: '12px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 13, lineHeight: 1.6, resize: 'vertical', boxSizing: 'border-box' }} />
-        }
+      <SheetTabs tabs={TABS} active={tab} onChange={t => { setTab(t); setSendType(null) }} />
 
-        {!busy && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <button onClick={generate} style={{ padding: '9px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 13 }}>↺ Regenerate</button>
-            <button onClick={() => { navigator.clipboard.writeText(draft); alert('Copied!') }}
-              style={{ padding: '9px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 13 }}>⧉ Copy</button>
-            {type !== 'whatsapp' && (
-              <a href={`mailto:${lead?.email}?subject=${encodeURIComponent('Regarding our proposal — Ginny')}&body=${encodeURIComponent(draft)}`}
-                style={{ padding: '9px 16px', background: '#6366f1', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
-                Open in Mail App
-              </a>
-            )}
-            {type === 'whatsapp' && (
-              <a href={`https://wa.me/${(lead?.whatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent(draft)}`}
-                target="_blank" rel="noreferrer"
-                style={{ padding: '9px 16px', background: '#25d366', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
-                Open in WhatsApp
-              </a>
+      <div style={{ padding: '20px 24px 36px' }}>
+
+        {/* Info */}
+        {tab === 'info' && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              {[['Phone', lead.phone], ['WhatsApp', lead.whatsapp], ['Industry', lead.industry], ['Source', lead.source], ['Assigned To', TEAM.find(t => t.id === lead.assigned_to)?.name]].map(([k, v]) => (
+                <div key={k} style={{ background: BG, borderRadius: 10, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 11, color: MUTED, marginBottom: 2 }}>{k}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{v || '—'}</div>
+                </div>
+              ))}
+              {lead.reminder_date && (
+                <div style={{ background: '#fffbeb', borderRadius: 10, padding: '10px 14px', border: '1px solid #fcd34d' }}>
+                  <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>⏰ Reminder</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{lead.reminder_date}</div>
+                  <div style={{ fontSize: 12, color: MUTED }}>{lead.reminder_note}</div>
+                </div>
+              )}
+            </div>
+            {lead.notes && <div style={{ background: BG, borderRadius: 10, padding: '12px 14px', fontSize: 13, color: TEXT, lineHeight: 1.65, marginBottom: 16 }}>{lead.notes}</div>}
+            <button onClick={() => onEdit(lead)} style={{ padding: '10px 22px', border: `1.5px solid ${LIME}`, color: BK, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>✎ Edit Lead</button>
+          </div>
+        )}
+
+        {/* Services */}
+        {tab === 'services' && (
+          <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              {SERVICES.map(s => {
+                const sv = svc[s.id]
+                return (
+                  <div key={s.id} style={{ border: `1.5px solid ${sv.enabled ? LIME : BORDER}`, borderRadius: 12, overflow: 'hidden', background: sv.enabled ? '#fafff0' : WHITE, transition: 'border 0.15s, background 0.15s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 10, cursor: 'pointer' }}
+                      onClick={() => setSvc(p => ({ ...p, [s.id]: { ...p[s.id], enabled: !p[s.id].enabled } }))}>
+                      <span style={{ fontSize: 18 }}>{s.emoji}</span>
+                      <span style={{ flex: 1, fontWeight: 500, fontSize: 14, color: TEXT }}>{s.label}</span>
+                      <div style={{ width: 22, height: 22, borderRadius: '50%', background: sv.enabled ? LIME : BORDER, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: sv.enabled ? BK : WHITE, fontWeight: 700, transition: 'all 0.15s', flexShrink: 0 }}>
+                        {sv.enabled ? '✓' : ''}
+                      </div>
+                    </div>
+                    {sv.enabled && (
+                      <div style={{ padding: '0 16px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: MUTED, marginBottom: 4 }}>Price / month (₹)</div>
+                          <input type="number" value={sv.price} placeholder="0"
+                            onChange={e => setSvc(p => ({ ...p, [s.id]: { ...p[s.id], price: e.target.value } }))}
+                            style={{ width: '100%', padding: '8px 10px', border: `1.5px solid ${BORDER}`, borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif' }} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: MUTED, marginBottom: 4 }}>Frequency</div>
+                          <select value={sv.frequency} onChange={e => setSvc(p => ({ ...p, [s.id]: { ...p[s.id], frequency: e.target.value } }))}
+                            style={{ width: '100%', padding: '8px 10px', border: `1.5px solid ${BORDER}`, borderRadius: 8, fontSize: 13, fontFamily: 'Poppins, sans-serif' }}>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="one-time">One-time</option>
+                          </select>
+                        </div>
+                        <div style={{ gridColumn: '1/-1' }}>
+                          <div style={{ fontSize: 11, color: MUTED, marginBottom: 4 }}>Notes</div>
+                          <input value={sv.notes} placeholder="Specifics..."
+                            onChange={e => setSvc(p => ({ ...p, [s.id]: { ...p[s.id], notes: e.target.value } }))}
+                            style={{ width: '100%', padding: '8px 10px', border: `1.5px solid ${BORDER}`, borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif' }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ background: BK, borderRadius: 14, padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ color: WHITE, fontSize: 14, fontWeight: 600 }}>Suite Total / Month</div>
+              <div style={{ color: LIME, fontSize: 24, fontWeight: 700 }}>{fmtINR(svcTotal)}</div>
+            </div>
+            <button onClick={saveServices} disabled={savingSvc}
+              style={{ padding: '11px 26px', background: LIME, color: BK, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Poppins, sans-serif', opacity: savingSvc ? 0.6 : 1 }}>
+              {savingSvc ? 'Saving...' : 'Save Services'}
+            </button>
+          </div>
+        )}
+
+        {/* Move Stage */}
+        {tab === 'move' && (
+          <div>
+            <div style={{ fontSize: 13, color: MUTED, marginBottom: 16 }}>Currently: <strong style={{ color: TEXT }}>{stage.emoji} {stage.label}</strong></div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {STAGES.filter(s => s.id !== lead.stage).map(s => (
+                <button key={s.id} onClick={async () => {
+                  await onStageChange(lead.id, s.id)
+                  onLogAction(lead.id, `Moved to ${s.label}`)
+                  toast(`${s.emoji} Moved to ${s.label}`)
+                  onClose()
+                }}
+                  style={{ padding: '10px 18px', border: `1.5px solid ${s.color}`, color: s.color, borderRadius: 22, background: s.bg, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>
+                  {s.emoji} {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Send */}
+        {tab === 'send' && (
+          <div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+              {SEND_OPTS.map(o => (
+                <button key={o.type} onClick={() => generateDraft(o.type)}
+                  style={{ padding: '10px 16px', border: `1.5px solid ${sendType === o.type ? LIME : BORDER}`, borderRadius: 10, background: sendType === o.type ? '#fafff0' : WHITE, cursor: 'pointer', fontSize: 13, fontFamily: 'Poppins, sans-serif', fontWeight: sendType === o.type ? 600 : 400 }}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {sendType && (
+              <div>
+                {draftBusy
+                  ? <div style={{ textAlign: 'center', padding: '32px 0', color: '#6366f1', fontSize: 14 }}>Drafting with Claude...</div>
+                  : <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={10}
+                      style={{ width: '100%', padding: '12px', border: `1.5px solid ${BORDER}`, borderRadius: 12, fontSize: 13, lineHeight: 1.65, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif' }} />
+                }
+                {!draftBusy && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                    <button onClick={() => generateDraft(sendType)} style={{ padding: '9px 14px', border: `1.5px solid ${BORDER}`, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontFamily: 'Poppins, sans-serif' }}>↺ Regenerate</button>
+                    <button onClick={() => navigator.clipboard.writeText(draft)} style={{ padding: '9px 14px', border: `1.5px solid ${BORDER}`, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontFamily: 'Poppins, sans-serif' }}>⧉ Copy</button>
+                    {sendType !== 'whatsapp' && (
+                      <a href={`mailto:${lead.email}?subject=${encodeURIComponent('Regarding our proposal — Ginny')}&body=${encodeURIComponent(draft)}`}
+                        style={{ padding: '9px 16px', background: BK, color: WHITE, borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+                        Open in Mail
+                      </a>
+                    )}
+                    {sendType === 'whatsapp' && (
+                      <a href={`https://wa.me/${(lead.whatsapp || '').replace(/\D/g, '')}?text=${encodeURIComponent(draft)}`}
+                        target="_blank" rel="noreferrer"
+                        style={{ padding: '9px 16px', background: '#25d366', color: WHITE, borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+                        Open in WhatsApp
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
+
+        {/* History */}
+        {tab === 'history' && (
+          <div>
+            {!(lead.history || []).length && <div style={{ color: MUTED, fontSize: 13 }}>No history yet.</div>}
+            {(lead.history || []).slice().reverse().map((h, i, arr) => (
+              <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: 14 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: LIME, marginTop: 5, flexShrink: 0 }} />
+                  {i < arr.length - 1 && <div style={{ width: 1, flex: 1, background: BORDER, marginTop: 4 }} />}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: TEXT }}>{h.action}</div>
+                  <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>{h.date}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-    </Overlay>
+    </Sheet>
   )
 }
 
-// ── Lead Form ─────────────────────────────────────────────────
-
-function LeadForm({ lead, onSave, onClose }) {
+// ── Lead Form (bottom sheet) ───────────────────────────────────
+function LeadForm({ lead, onSave, onClose, toast }) {
   const blank = { company: '', contact: '', email: '', phone: '', whatsapp: '', industry: 'Technology', value: '', currency: 'INR', stage: 'lead', priority: 'medium', source: '', notes: '', assigned_to: 'you', reminder_date: '', reminder_note: '', history: [] }
   const [form, setForm] = useState(lead ? { ...lead, value: lead.value || '', reminder_date: lead.reminder_date || '', reminder_note: lead.reminder_note || '' } : blank)
   const [saving, setSaving] = useState(false)
-
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const save = async () => {
     if (!form.company || !form.contact || !form.email) return alert('Company, contact and email are required.')
     setSaving(true)
     const payload = { ...form, value: Number(form.value) || 0 }
-    if (!payload.id) {
-      payload.history = [{ date: today(), action: 'Lead created' }]
-    }
+    if (!payload.id) payload.history = [{ date: today(), action: 'Lead created' }]
     const { data, error } = await upsertLead(payload)
-    if (error) alert('Save failed: ' + error.message)
-    else onSave(data)
+    if (error) { alert('Save failed: ' + error.message); setSaving(false); return }
+    toast(lead ? 'Lead updated ✓' : 'Lead added ✓')
+    onSave(data)
     setSaving(false)
   }
 
+  const inp = { width: '100%', padding: '9px 12px', border: `1.5px solid ${BORDER}`, borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif', outline: 'none' }
+
   const F = ({ label, k, type = 'text', opts }) => (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 5 }}>{label}</label>
-      {opts?.select ? (
-        <select value={form[k]} onChange={e => set(k, e.target.value)} style={{ width: '100%', padding: '8px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13 }}>
-          {opts.options.map(o => <option key={o.value || o} value={o.value || o}>{o.label || o}</option>)}
-        </select>
-      ) : opts?.textarea ? (
-        <textarea value={form[k]} onChange={e => set(k, e.target.value)} rows={3}
-          style={{ width: '100%', padding: '8px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, resize: 'vertical', boxSizing: 'border-box' }} />
-      ) : (
-        <input type={type} value={form[k]} onChange={e => set(k, e.target.value)}
-          style={{ width: '100%', padding: '8px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
-      )}
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 5 }}>{label}</label>
+      {opts?.select
+        ? <select value={form[k]} onChange={e => set(k, e.target.value)} style={inp}>{opts.options.map(o => <option key={o.value || o} value={o.value || o}>{o.label || o}</option>)}</select>
+        : opts?.textarea
+          ? <textarea value={form[k]} onChange={e => set(k, e.target.value)} rows={3} style={{ ...inp, resize: 'vertical' }} />
+          : <input type={type} value={form[k]} onChange={e => set(k, e.target.value)} style={inp} />
+      }
     </div>
   )
 
   return (
-    <Overlay onClose={onClose}>
-      <div style={{ padding: '28px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{lead ? 'Edit Lead' : 'Add New Lead'}</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>✕</button>
-        </div>
-
+    <Sheet onClose={onClose} title={lead ? 'Edit Lead' : 'Add New Lead'}>
+      <div style={{ padding: '20px 24px 36px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
           <F label="Company *" k="company" />
           <F label="Contact Name *" k="contact" />
@@ -406,225 +623,124 @@ function LeadForm({ lead, onSave, onClose }) {
           <F label="Industry" k="industry" opts={{ select: true, options: INDUSTRIES }} />
           <F label="Deal Value (₹)" k="value" type="number" />
           <F label="Stage" k="stage" opts={{ select: true, options: STAGES.map(s => ({ value: s.id, label: s.label })) }} />
-          <F label="Priority" k="priority" opts={{ select: true, options: ['critical','high','medium','low'] }} />
+          <F label="Priority" k="priority" opts={{ select: true, options: ['critical', 'high', 'medium', 'low'] }} />
           <F label="Assigned To" k="assigned_to" opts={{ select: true, options: TEAM.map(t => ({ value: t.id, label: t.name })) }} />
           <F label="Lead Source" k="source" opts={{ select: true, options: ['', ...SOURCES] }} />
           <F label="Reminder Date" k="reminder_date" type="date" />
         </div>
         <F label="Reminder Note" k="reminder_note" opts={{ textarea: true }} />
         <F label="Notes" k="notes" opts={{ textarea: true }} />
-
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-          <button onClick={onClose} style={{ padding: '10px 20px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
-          <button onClick={save} disabled={saving} style={{ padding: '10px 26px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 600, opacity: saving ? 0.7 : 1 }}>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '11px 22px', border: `1.5px solid ${BORDER}`, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 14, fontFamily: 'Poppins, sans-serif' }}>Cancel</button>
+          <button onClick={save} disabled={saving} style={{ padding: '11px 28px', background: LIME, color: BK, border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: 'Poppins, sans-serif', opacity: saving ? 0.7 : 1 }}>
             {saving ? 'Saving...' : 'Save Lead'}
           </button>
         </div>
       </div>
-    </Overlay>
-  )
-}
-
-// ── Lead Detail ───────────────────────────────────────────────
-
-function LeadDetail({ lead: initialLead, leads, onClose, onEdit, onStageChange, onLogAction }) {
-  const [tab, setTab] = useState('overview')
-  const [emailModal, setEmailModal] = useState(null)
-  const lead = leads.find(l => l.id === initialLead.id) || initialLead
-  const stage = getStage(lead.stage)
-
-  return (
-    <Overlay onClose={onClose}>
-      <div style={{ padding: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 22 }}>
-          <Avatar name={lead.company} size={48} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 20 }}>{lead.company}</div>
-            <div style={{ fontSize: 13, color: '#6b7280' }}>{lead.contact} · {lead.email}</div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Badge label={stage.label} color={stage.color} bg={stage.bg} />
-              <Badge label={lead.priority} color={{ critical: '#ef4444', high: '#f59e0b', medium: '#3b82f6', low: '#6b7280' }[lead.priority]} bg={{ critical: '#fee2e2', high: '#fffbeb', medium: '#eff6ff', low: '#f9fafb' }[lead.priority]} />
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#059669' }}>{fmtINR(lead.value)}</span>
-            </div>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9ca3af' }}>✕</button>
-        </div>
-
-        <Tabs tabs={[{ id: 'overview', label: 'Overview' }, { id: 'actions', label: 'Actions' }, { id: 'history', label: 'History' }]} active={tab} onChange={setTab} />
-
-        {tab === 'overview' && (
-          <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
-              {[['Phone', lead.phone], ['WhatsApp', lead.whatsapp], ['Industry', lead.industry], ['Source', lead.source], ['Assigned To', TEAM.find(t => t.id === lead.assigned_to)?.name]].map(([k, v]) => (
-                <div key={k} style={{ background: '#f9fafb', borderRadius: 10, padding: '10px 14px' }}>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>{k}</div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{v || '—'}</div>
-                </div>
-              ))}
-              {lead.reminder_date && (
-                <div style={{ background: '#fffbeb', borderRadius: 10, padding: '10px 14px', border: '1px solid #fcd34d' }}>
-                  <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>⏰ Reminder</div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{lead.reminder_date}</div>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>{lead.reminder_note}</div>
-                </div>
-              )}
-            </div>
-            {lead.notes && <div style={{ background: '#f9fafb', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#374151', lineHeight: 1.65, marginBottom: 14 }}>{lead.notes}</div>}
-            <button onClick={() => onEdit(lead)} style={{ padding: '9px 18px', border: '1.5px solid #6366f1', color: '#6366f1', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>✎ Edit Lead</button>
-          </div>
-        )}
-
-        {tab === 'actions' && (
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10 }}>Move to Stage</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 22 }}>
-              {STAGES.filter(s => s.id !== lead.stage).map(s => (
-                <button key={s.id} onClick={() => { onStageChange(lead.id, s.id); onLogAction(lead.id, `Moved to ${s.label}`) }}
-                  style={{ padding: '6px 14px', border: `1.5px solid ${s.color}`, color: s.color, borderRadius: 20, background: s.bg, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                  → {s.label}
-                </button>
-              ))}
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10 }}>Communications</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[['quotation','✉️ Draft Quotation Email'], ['sow','📝 Request SOW Signature'], ['whatsapp','💬 WhatsApp Follow-up'], ['onboarding','🤝 Introduce Ops Team'], ['followup','↩ Draft Follow-up Email']].map(([type, label]) => (
-                <button key={type} onClick={() => setEmailModal(type)}
-                  style={{ padding: '12px 16px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 13, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'inherit' }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === 'history' && (
-          <div>
-            {(lead.history || []).length === 0 && <div style={{ color: '#9ca3af', fontSize: 13 }}>No history yet.</div>}
-            {(lead.history || []).slice().reverse().map((h, i, arr) => (
-              <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: 14 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#6366f1', marginTop: 5, flexShrink: 0 }} />
-                  {i < arr.length - 1 && <div style={{ width: 1, flex: 1, background: '#e5e7eb', marginTop: 4 }} />}
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{h.action}</div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{h.date}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {emailModal && <EmailComposer lead={lead} type={emailModal} onClose={() => setEmailModal(null)} />}
-      </div>
-    </Overlay>
+    </Sheet>
   )
 }
 
 // ── Funnel View ───────────────────────────────────────────────
-
 function FunnelView({ leads }) {
   const active = leads.filter(l => l.stage !== 'closed_lost')
   const total = active.length || 1
-  const metrics = [
-    { label: 'Total Pipeline', value: fmtINR(active.reduce((s, l) => s + (l.value || 0), 0)), color: '#6366f1' },
-    { label: 'Expected Close (75%)', value: fmtINR(leads.filter(l => ['negotiation','sow_pending','onboarding'].includes(l.stage)).reduce((s, l) => s + (l.value || 0) * 0.75, 0)), color: '#10b981' },
-    { label: 'Closed Won', value: fmtINR(leads.filter(l => l.stage === 'closed_won').reduce((s, l) => s + (l.value || 0), 0)), color: '#059669' },
-    { label: 'Active Deals', value: active.length, color: '#f59e0b', plain: true },
-  ]
-
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 28 }}>
-        {metrics.map(m => (
-          <div key={m.label} style={{ background: '#f9fafb', borderRadius: 12, padding: '16px' }}>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>{m.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: m.color }}>{m.value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Sales Funnel</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {STAGES.filter(s => s.id !== 'closed_lost').map(s => {
-          const count = leads.filter(l => l.stage === s.id).length
-          const val = leads.filter(l => l.stage === s.id).reduce((a, l) => a + (l.value || 0), 0)
-          const pct = Math.max(Math.round((count / total) * 100), count > 0 ? 3 : 0)
-          return (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 130, fontSize: 12, color: '#374151', flexShrink: 0 }}>{s.label}</div>
-              <div style={{ flex: 1, background: '#f3f4f6', borderRadius: 8, height: 28, overflow: 'hidden' }}>
-                <div style={{ width: `${pct}%`, height: '100%', background: s.color, borderRadius: 8, display: 'flex', alignItems: 'center', paddingLeft: 10, minWidth: count > 0 ? 32 : 0 }}>
-                  {count > 0 && <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>{count}</span>}
-                </div>
-              </div>
-              <div style={{ width: 100, fontSize: 12, color: '#6b7280', textAlign: 'right' }}>{val > 0 ? fmtINR(val) : '—'}</div>
+      <div style={{ background: BK, borderRadius: 18, padding: '22px 28px', marginBottom: 22 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 20 }}>
+          {[
+            { label: 'Active Pipeline',  value: fmtINR(active.reduce((s,l)=>s+(l.value||0),0)), color: LIME },
+            { label: 'Closed Won',       value: fmtINR(leads.filter(l=>l.stage==='closed_won').reduce((s,l)=>s+(l.value||0),0)), color: '#10b981' },
+            { label: 'Expected (75%)',   value: fmtINR(leads.filter(l=>['negotiation','sow_pending','onboarding'].includes(l.stage)).reduce((s,l)=>s+(l.value||0)*0.75,0)), color: '#f59e0b' },
+          ].map(m => (
+            <div key={m.label} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>{m.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: m.color }}>{m.value}</div>
             </div>
-          )
-        })}
+          ))}
+        </div>
+      </div>
+      <div style={{ background: WHITE, borderRadius: 16, padding: '22px 24px', border: `1px solid ${BORDER}` }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: TEXT, marginBottom: 18 }}>Sales Funnel</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {STAGES.filter(s => s.id !== 'closed_lost').map(s => {
+            const count = leads.filter(l => l.stage === s.id).length
+            const val   = leads.filter(l => l.stage === s.id).reduce((a,l) => a+(l.value||0), 0)
+            const pct   = Math.max(Math.round((count/total)*100), count > 0 ? 4 : 0)
+            return (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 148, fontSize: 12, color: TEXT, flexShrink: 0 }}>{s.emoji} {s.label}</div>
+                <div style={{ flex: 1, background: BG, borderRadius: 8, height: 30, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: s.color, borderRadius: 8, display: 'flex', alignItems: 'center', paddingLeft: 10, minWidth: count > 0 ? 32 : 0, transition: 'width 0.5s ease' }}>
+                    {count > 0 && <span style={{ color: WHITE, fontSize: 12, fontWeight: 700 }}>{count}</span>}
+                  </div>
+                </div>
+                <div style={{ width: 112, fontSize: 12, color: MUTED, textAlign: 'right', flexShrink: 0 }}>{val > 0 ? fmtINR(val) : '—'}</div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Daily Briefing ────────────────────────────────────────────
-
-function DailyBriefing({ leads }) {
+// ── Briefing View ─────────────────────────────────────────────
+function BriefingView({ leads }) {
   const overdue = leads.filter(l => l.reminder_date && l.reminder_date < today())
-  const todayItems = leads.filter(l => l.reminder_date === today())
-
+  const due     = leads.filter(l => l.reminder_date === today())
+  const won     = leads.filter(l => l.stage === 'closed_won').reduce((s,l) => s+(l.value||0), 0)
   const mailBody = [
-    `GINNY CRM — DAILY SALES BRIEFING`,
-    `Date: ${today()}`,
-    ``,
-    `TODAY'S REMINDERS (${todayItems.length}):`,
-    ...todayItems.map(l => `• ${l.company} (${l.contact}): ${l.reminder_note || 'No note'} | Stage: ${getStage(l.stage).label} | ${fmtINR(l.value)}`),
-    ``,
-    `OVERDUE (${overdue.length}):`,
-    ...overdue.map(l => `• ${l.company}: ${l.reminder_note || 'No note'} (Due: ${l.reminder_date})`),
-    ``,
-    `PIPELINE SNAPSHOT:`,
-    ...STAGES.map(s => `• ${s.label}: ${leads.filter(l => l.stage === s.id).length} deal(s) — ${fmtINR(leads.filter(l => l.stage === s.id).reduce((a, l) => a + (l.value || 0), 0))}`),
-    ``,
-    `TOTAL ACTIVE PIPELINE: ${fmtINR(leads.filter(l => l.stage !== 'closed_lost').reduce((s, l) => s + (l.value || 0), 0))}`,
+    'GINNY CRM — DAILY BRIEFING', `Date: ${today()}`, '',
+    `TODAY (${due.length}):`, ...due.map(l => `• ${l.company} (${l.contact}): ${l.reminder_note||'No note'} | ${getStage(l.stage).label} | ${fmtINR(l.value)}`),
+    '', `OVERDUE (${overdue.length}):`, ...overdue.map(l => `• ${l.company}: ${l.reminder_note||'No note'} (Due: ${l.reminder_date})`),
+    '', 'PIPELINE:', ...STAGES.map(s => `• ${s.label}: ${leads.filter(l=>l.stage===s.id).length} — ${fmtINR(leads.filter(l=>l.stage===s.id).reduce((a,l)=>a+(l.value||0),0))}`),
+    '', `ACTIVE TOTAL: ${fmtINR(leads.filter(l=>l.stage!=='closed_lost').reduce((s,l)=>s+(l.value||0),0))}`,
   ].join('\n')
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-        <div style={{ background: todayItems.length > 0 ? '#fffbeb' : '#f9fafb', borderRadius: 12, padding: '16px', border: todayItems.length > 0 ? '1px solid #fcd34d' : 'none' }}>
-          <div style={{ fontSize: 11, color: '#92400e', marginBottom: 4 }}>⏰ Due Today</div>
-          <div style={{ fontSize: 30, fontWeight: 700, color: '#f59e0b' }}>{todayItems.length}</div>
+      <div style={{ background: BK, borderRadius: 20, padding: '26px 28px', marginBottom: 20 }}>
+        <div style={{ fontSize: 11, color: '#666', letterSpacing: 1, marginBottom: 4 }}>DAILY BRIEFING</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: WHITE, marginBottom: 22 }}>
+          {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </div>
-        <div style={{ background: overdue.length > 0 ? '#fee2e2' : '#f9fafb', borderRadius: 12, padding: '16px', border: overdue.length > 0 ? '1px solid #fca5a5' : 'none' }}>
-          <div style={{ fontSize: 11, color: '#991b1b', marginBottom: 4 }}>🔴 Overdue</div>
-          <div style={{ fontSize: 30, fontWeight: 700, color: '#ef4444' }}>{overdue.length}</div>
-        </div>
-      </div>
-
-      {[...overdue, ...todayItems].length === 0
-        ? <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: 14 }}>No reminders due today — you're all caught up!</div>
-        : <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-          {[...overdue, ...todayItems].map(l => (
-            <div key={l.id} style={{ background: l.reminder_date < today() ? '#fff5f5' : '#fffbeb', borderRadius: 10, padding: '12px 16px', border: `1px solid ${l.reminder_date < today() ? '#fca5a5' : '#fcd34d'}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Avatar name={l.company} size={30} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{l.company} <span style={{ fontWeight: 400, color: '#6b7280' }}>— {l.contact}</span></div>
-                  <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>{l.reminder_note || 'No note'}</div>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <Badge label={getStage(l.stage).label} color={getStage(l.stage).color} bg={getStage(l.stage).bg} />
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>{l.reminder_date}</div>
-                </div>
-              </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+          {[
+            { label: '⏰ Due Today', value: due.length,  color: due.length > 0 ? '#f59e0b' : MUTED },
+            { label: '🔴 Overdue',   value: overdue.length, color: overdue.length > 0 ? '#ef4444' : MUTED },
+            { label: '🏆 Won',       value: fmtINR(won), color: LIME, small: true },
+          ].map(m => (
+            <div key={m.label} style={{ background: '#ffffff0f', borderRadius: 12, padding: '14px 16px' }}>
+              <div style={{ fontSize: 11, color: '#777', marginBottom: 6 }}>{m.label}</div>
+              <div style={{ fontSize: m.small ? 16 : 30, fontWeight: 700, color: m.color }}>{m.value}</div>
             </div>
           ))}
         </div>
+      </div>
+
+      {[...overdue, ...due].length === 0
+        ? <div style={{ textAlign: 'center', padding: '40px', color: MUTED, background: WHITE, borderRadius: 16, border: `1px solid ${BORDER}`, fontSize: 14 }}>🎉 No reminders today — you're all caught up!</div>
+        : <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+            {[...overdue, ...due].map(l => (
+              <div key={l.id} style={{ background: WHITE, borderRadius: 14, padding: '14px 18px', border: `1px solid ${l.reminder_date < today() ? '#fca5a5' : '#fcd34d'}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={l.company} size={38} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: TEXT }}>{l.company} <span style={{ fontWeight: 400, color: MUTED }}>— {l.contact}</span></div>
+                  <div style={{ fontSize: 12, color: TEXT, marginTop: 2 }}>{l.reminder_note || 'No note'}</div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <Badge label={getStage(l.stage).label} color={getStage(l.stage).color} bg={getStage(l.stage).bg} />
+                  <div style={{ fontSize: 11, color: MUTED, marginTop: 4 }}>{l.reminder_date}</div>
+                </div>
+              </div>
+            ))}
+          </div>
       }
 
       <a href={`mailto:?subject=${encodeURIComponent(`Ginny CRM — Daily Briefing ${today()}`)}&body=${encodeURIComponent(mailBody)}`}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '11px 22px', background: '#6366f1', color: '#fff', borderRadius: 10, textDecoration: 'none', fontSize: 14, fontWeight: 600 }}>
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 26px', background: BK, color: WHITE, borderRadius: 12, textDecoration: 'none', fontSize: 14, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>
         ✉ Send Daily Briefing Email
       </a>
     </div>
@@ -632,28 +748,30 @@ function DailyBriefing({ leads }) {
 }
 
 // ── Root App ──────────────────────────────────────────────────
-
 export default function App() {
-  const [leads, setLeads] = useState([])
-  const [view, setView] = useState('pipeline')
-  const [showForm, setShowForm] = useState(false)
-  const [editLead, setEditLead] = useState(null)
-  const [detailLead, setDetailLead] = useState(null)
-  const [showAI, setShowAI] = useState(false)
-  const [showInvite, setShowInvite] = useState(false)
-  const [search, setSearch] = useState('')
+  const [leads,       setLeads]       = useState([])
+  const [view,        setView]        = useState('board')
+  const [showForm,    setShowForm]    = useState(false)
+  const [editLead,    setEditLead]    = useState(null)
+  const [detailLead,  setDetailLead]  = useState(null)
+  const [showAI,      setShowAI]      = useState(false)
+  const [showInvite,  setShowInvite]  = useState(false)
+  const [search,      setSearch]      = useState('')
   const [filterStage, setFilterStage] = useState('all')
-  const [user, setUser] = useState(null)
-  const [userRole, setUserRole] = useState('viewer')
+  const [user,        setUser]        = useState(null)
+  const [userRole,    setUserRole]    = useState('viewer')
+  const [dragging,    setDragging]    = useState(null)
+  const [dragOver,    setDragOver]    = useState(null)
+  const [confetti,    setConfetti]    = useState(false)
+  const { toasts, toast } = useToast()
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user))
     loadLeads()
-    // Real-time sync
-    const channel = supabase.channel('leads-changes')
+    const ch = supabase.channel('leads-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, loadLeads)
       .subscribe()
-    return () => supabase.removeChannel(channel)
+    return () => supabase.removeChannel(ch)
   }, [])
 
   useEffect(() => {
@@ -667,7 +785,7 @@ export default function App() {
     if (data) setLeads(data)
   }
 
-  const saveLead = async (lead) => {
+  const saveLead = (lead) => {
     setLeads(prev => prev.find(l => l.id === lead.id) ? prev.map(l => l.id === lead.id ? lead : l) : [lead, ...prev])
     setShowForm(false)
     setEditLead(null)
@@ -676,6 +794,7 @@ export default function App() {
   const stageChange = async (id, stage) => {
     await updateLeadStage(id, stage)
     setLeads(prev => prev.map(l => l.id === id ? { ...l, stage } : l))
+    if (stage === 'closed_won') { setConfetti(true); toast('🏆 Deal closed! Congratulations!') }
   }
 
   const logAction = async (id, action) => {
@@ -692,114 +811,188 @@ export default function App() {
       && (filterStage === 'all' || l.stage === filterStage)
   })
 
-  const todayReminders = leads.filter(l => l.reminder_date === today()).length
-  const canEdit = ['admin','editor'].includes(userRole)
-  const isAdmin = userRole === 'admin'
+  const pipelineVal  = leads.filter(l => l.stage !== 'closed_lost').reduce((s,l) => s+(l.value||0), 0)
+  const hotVal       = leads.filter(l => ['negotiation','sow_pending'].includes(l.stage)).reduce((s,l) => s+(l.value||0), 0)
+  const todayCount   = leads.filter(l => l.reminder_date === today()).length
+  const overdueCount = leads.filter(l => l.reminder_date && l.reminder_date < today()).length
+  const canEdit      = ['admin','editor'].includes(userRole)
+  const isAdmin      = userRole === 'admin'
+
+  const onDragStart = (e, id) => { setDragging(id); e.dataTransfer.effectAllowed = 'move' }
+  const onDragOver  = (e, sid) => { e.preventDefault(); setDragOver(sid) }
+  const onDragEnd   = () => { setDragging(null); setDragOver(null) }
+  const onDrop = async (e, sid) => {
+    e.preventDefault()
+    if (dragging) {
+      const lead = leads.find(l => l.id === dragging)
+      if (lead && lead.stage !== sid) {
+        await stageChange(dragging, sid)
+        await logAction(dragging, `Moved to ${getStage(sid).label}`)
+        if (sid !== 'closed_won') toast(`Moved to ${getStage(sid).label}`)
+      }
+    }
+    setDragging(null); setDragOver(null)
+  }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8f8fc', fontFamily: "'DM Sans', 'Segoe UI', sans-serif" }}>
+    <div style={{ minHeight: '100vh', background: BG, fontFamily: 'Poppins, sans-serif' }}>
+      <style>{`
+        @keyframes sheetUp    { from { transform: translateY(60px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+        @keyframes toastIn    { from { opacity: 0; transform: translateX(-50%) translateY(12px) } to { opacity: 1; transform: translateX(-50%) translateY(0) } }
+        @keyframes confettiFall { 0% { transform: translateY(-10px) rotate(0deg); opacity: 1 } 100% { transform: translateY(105vh) rotate(720deg); opacity: 0 } }
+        * { box-sizing: border-box }
+        ::-webkit-scrollbar { width: 5px; height: 5px }
+        ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: ${LIME} !important; box-shadow: 0 0 0 3px ${LIME}22 }
+      `}</style>
 
-      {/* Topbar */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '0 24px', display: 'flex', alignItems: 'center', gap: 12, height: 58, position: 'sticky', top: 0, zIndex: 100 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 700 }}>G</div>
+      {/* ── Topbar ── */}
+      <div style={{ background: BK, height: 62, padding: '0 24px', display: 'flex', alignItems: 'center', gap: 14, position: 'sticky', top: 0, zIndex: 100 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 6 }}>
+          <GinnyLogo size={34} />
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.3 }}>Ginny CRM</div>
-            <div style={{ fontSize: 10, color: '#9ca3af', lineHeight: 1 }}>Sales & Strategy</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: WHITE, letterSpacing: -0.3 }}>Ginny</div>
+            <div style={{ fontSize: 10, color: '#666', lineHeight: 1 }}>Sales CRM</div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 2, marginLeft: 12 }}>
-          {[['pipeline','Pipeline'], ['funnel','Funnel'], ['briefing','Briefing']].map(([id, label]) => (
+        {/* Pill nav */}
+        <div style={{ display: 'flex', background: '#2a2a2a', borderRadius: 30, padding: 3, gap: 2 }}>
+          {[['board','Board'],['funnel','Funnel'],['briefing','Briefing']].map(([id, label]) => (
             <button key={id} onClick={() => setView(id)}
-              style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: view === id ? '#eef2ff' : 'transparent', color: view === id ? '#6366f1' : '#6b7280', fontWeight: view === id ? 600 : 400, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', position: 'relative' }}>
+              style={{ padding: '6px 18px', borderRadius: 26, border: 'none', background: view === id ? LIME : 'transparent', color: view === id ? BK : '#777', fontWeight: view === id ? 700 : 400, cursor: 'pointer', fontSize: 13, fontFamily: 'Poppins, sans-serif', position: 'relative', transition: 'all 0.15s' }}>
               {label}
-              {id === 'briefing' && todayReminders > 0 && (
-                <span style={{ position: 'absolute', top: 2, right: 2, background: '#ef4444', color: '#fff', borderRadius: 10, fontSize: 9, padding: '1px 4px', lineHeight: 1.4 }}>{todayReminders}</span>
+              {id === 'briefing' && (todayCount + overdueCount) > 0 && (
+                <span style={{ position: 'absolute', top: 0, right: 2, background: '#ef4444', color: WHITE, borderRadius: 10, fontSize: 8, padding: '1px 5px', lineHeight: 1.5, fontWeight: 700 }}>{todayCount + overdueCount}</span>
               )}
             </button>
           ))}
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={() => setShowAI(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#6366f1', fontFamily: 'inherit' }}>
-            ✦ AI Advisor
+          <button onClick={() => setShowAI(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 18px', border: `1.5px solid ${LIME}`, borderRadius: 22, background: 'transparent', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: LIME, fontFamily: 'Poppins, sans-serif' }}>
+            ✦ Ask AI
           </button>
           {isAdmin && (
-            <button onClick={() => setShowInvite(true)} style={{ padding: '7px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', fontSize: 13, color: '#374151', fontFamily: 'inherit' }}>
-              👥 Manage Access
+            <button onClick={() => setShowInvite(true)}
+              style={{ padding: '7px 14px', border: '1px solid #333', borderRadius: 22, background: 'transparent', cursor: 'pointer', fontSize: 13, color: '#aaa', fontFamily: 'Poppins, sans-serif' }}>
+              👥 Access
             </button>
           )}
           {canEdit && (
-            <button onClick={() => setShowForm(true)} style={{ padding: '7px 18px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'inherit' }}>
+            <button onClick={() => setShowForm(true)}
+              style={{ padding: '7px 20px', background: LIME, color: BK, border: 'none', borderRadius: 22, cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'Poppins, sans-serif' }}>
               + Add Lead
             </button>
           )}
-          <button onClick={() => signOut()} title="Sign out" style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', background: '#f3f4f6', cursor: 'pointer', fontSize: 16 }}>⎋</button>
+          <button onClick={() => signOut()} title="Sign out"
+            style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid #333', background: 'transparent', cursor: 'pointer', fontSize: 16, color: '#777' }}>
+            ⎋
+          </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ padding: '24px', maxWidth: 1120, margin: '0 auto' }}>
-
-        {view === 'pipeline' && (
-          <>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, contacts..."
-                style={{ flex: 1, minWidth: 200, padding: '9px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 13, fontFamily: 'inherit' }} />
-              <select value={filterStage} onChange={e => setFilterStage(e.target.value)}
-                style={{ padding: '9px 14px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 13, fontFamily: 'inherit' }}>
-                <option value="all">All Stages</option>
-                {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
+      {/* ── Board View ── */}
+      {view === 'board' && (
+        <div style={{ padding: 24 }}>
+          {/* Metric cards */}
+          <div style={{ background: BK, borderRadius: 20, padding: '22px 28px', marginBottom: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
+              {[
+                { label: 'Total Pipeline', value: fmtINR(pipelineVal),  color: LIME },
+                { label: '🔥 Hot Deals',   value: fmtINR(hotVal),        color: '#f59e0b' },
+                { label: '⏰ Due Today',   value: todayCount,            color: todayCount > 0 ? '#f59e0b' : MUTED },
+                { label: '🔴 Overdue',     value: overdueCount,          color: overdueCount > 0 ? '#ef4444' : MUTED },
+              ].map(m => (
+                <div key={m.label} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>{m.label}</div>
+                  <div style={{ fontSize: typeof m.value === 'string' ? 20 : 32, fontWeight: 700, color: m.color }}>{m.value}</div>
+                </div>
+              ))}
             </div>
+          </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 14 }}>
-              {STAGES.map(stage => {
-                const stageLeads = filtered.filter(l => l.stage === stage.id)
-                return (
-                  <div key={stage.id} style={{ background: '#fff', borderRadius: 14, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-                    <div style={{ padding: '11px 16px', background: stage.bg, display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #f3f4f6' }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: stage.color }} />
-                      <div style={{ fontWeight: 600, fontSize: 13, color: stage.color, flex: 1 }}>{stage.label}</div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: stage.color }}>{stageLeads.length}</div>
-                    </div>
-                    <div style={{ padding: '8px 8px', display: 'flex', flexDirection: 'column', gap: 7, minHeight: 50 }}>
-                      {stageLeads.length === 0 && <div style={{ fontSize: 12, color: '#e5e7eb', textAlign: 'center', padding: '10px 0' }}>Empty</div>}
-                      {stageLeads.map(l => (
-                        <div key={l.id} onClick={() => setDetailLead(l)}
-                          style={{ background: '#f9fafb', borderRadius: 10, padding: '11px 13px', cursor: 'pointer', border: '1px solid #f3f4f6', transition: 'box-shadow 0.15s' }}
-                          onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 14px rgba(99,102,241,0.13)'}
-                          onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-                            <Avatar name={l.company} size={26} />
+          {/* Search + filter */}
+          <div style={{ display: 'flex', gap: 10, marginBottom: 18, flexWrap: 'wrap' }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads, contacts..."
+              style={{ flex: 1, minWidth: 200, padding: '10px 18px', border: `1.5px solid ${BORDER}`, borderRadius: 22, fontSize: 13, fontFamily: 'Poppins, sans-serif', background: WHITE }} />
+            <select value={filterStage} onChange={e => setFilterStage(e.target.value)}
+              style={{ padding: '10px 16px', border: `1.5px solid ${BORDER}`, borderRadius: 22, fontSize: 13, fontFamily: 'Poppins, sans-serif', background: WHITE }}>
+              <option value="all">All Stages</option>
+              {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+
+          {/* Kanban columns */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))', gap: 14 }}>
+            {STAGES.map(stage => {
+              const cols   = filtered.filter(l => l.stage === stage.id)
+              const isOver = dragOver === stage.id
+              return (
+                <div key={stage.id}
+                  onDragOver={e => onDragOver(e, stage.id)}
+                  onDrop={e => onDrop(e, stage.id)}
+                  style={{ background: WHITE, borderRadius: 16, border: `1.5px solid ${isOver ? LIME : BORDER}`, overflow: 'hidden', transition: 'border 0.15s, box-shadow 0.15s', boxShadow: isOver ? `0 0 0 3px ${LIME}28` : 'none' }}>
+                  {/* Column header */}
+                  <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BORDER}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: stage.color }} />
+                    <div style={{ fontWeight: 600, fontSize: 13, color: TEXT, flex: 1 }}>{stage.label}</div>
+                    {cols.length > 0 && <span style={{ background: LIME, color: BK, borderRadius: 10, fontSize: 10, fontWeight: 700, padding: '1px 8px', lineHeight: 1.6 }}>{cols.length}</span>}
+                  </div>
+                  {/* Lead cards */}
+                  <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 7, minHeight: 64 }}>
+                    {cols.length === 0 && <div style={{ fontSize: 12, color: isOver ? LIME : '#ddd', textAlign: 'center', padding: '14px 0', transition: 'color 0.15s' }}>Drop here</div>}
+                    {cols.map(l => {
+                      const svcOn = l.services ? Object.entries(l.services).filter(([,v]) => v?.enabled) : []
+                      return (
+                        <div key={l.id}
+                          draggable={canEdit}
+                          onDragStart={e => onDragStart(e, l.id)}
+                          onDragEnd={onDragEnd}
+                          onClick={() => setDetailLead(l)}
+                          style={{ background: dragging === l.id ? '#fafff0' : BG, borderRadius: 12, padding: '12px 13px', cursor: 'pointer', border: `1px solid ${dragging === l.id ? LIME : BORDER}`, opacity: dragging === l.id ? 0.45 : 1, transition: 'all 0.15s' }}
+                          onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 4px 18px ${LIME}28`; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = LIME }}
+                          onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = dragging === l.id ? LIME : BORDER }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <Avatar name={l.company} size={28} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.company}</div>
-                              <div style={{ fontSize: 11, color: '#9ca3af' }}>{l.contact}</div>
+                              <div style={{ fontSize: 11, color: MUTED }}>{l.contact}</div>
                             </div>
-                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: { critical: '#ef4444', high: '#f59e0b', medium: '#3b82f6', low: '#d1d5db' }[l.priority], flexShrink: 0 }} />
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: { critical: '#ef4444', high: '#f59e0b', medium: '#3b82f6', low: '#d1d5db' }[l.priority] || '#d1d5db', flexShrink: 0 }} />
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: svcOn.length ? 8 : 0 }}>
                             <span style={{ fontSize: 13, fontWeight: 700, color: '#059669' }}>{fmtINR(l.value)}</span>
-                            {l.reminder_date && <span style={{ fontSize: 10, color: l.reminder_date <= today() ? '#ef4444' : '#9ca3af' }}>⏰ {l.reminder_date}</span>}
+                            {l.reminder_date && <span style={{ fontSize: 10, color: l.reminder_date <= today() ? '#ef4444' : MUTED }}>⏰ {l.reminder_date}</span>}
                           </div>
+                          {svcOn.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                              {svcOn.slice(0, 3).map(([id]) => {
+                                const s = SERVICES.find(sv => sv.id === id)
+                                return s ? <span key={id} style={{ fontSize: 9, background: BK, color: LIME, borderRadius: 6, padding: '2px 7px', fontWeight: 600 }}>{s.emoji} {s.label.split(' ')[0]}</span> : null
+                              })}
+                              {svcOn.length > 3 && <span style={{ fontSize: 9, background: BG, color: MUTED, borderRadius: 6, padding: '2px 7px' }}>+{svcOn.length - 3}</span>}
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
-            </div>
-          </>
-        )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
-        {view === 'funnel' && <FunnelView leads={leads} />}
-        {view === 'briefing' && <DailyBriefing leads={leads} />}
-      </div>
+      {view === 'funnel'   && <div style={{ padding: 24 }}><FunnelView leads={leads} /></div>}
+      {view === 'briefing' && <div style={{ padding: 24 }}><BriefingView leads={leads} /></div>}
 
-      {showForm && <LeadForm onSave={saveLead} onClose={() => setShowForm(false)} />}
-      {editLead && <LeadForm lead={editLead} onSave={saveLead} onClose={() => setEditLead(null)} />}
-      {detailLead && (
+      {/* Overlays */}
+      {showForm    && <LeadForm onSave={saveLead} onClose={() => setShowForm(false)} toast={toast} />}
+      {editLead    && <LeadForm lead={editLead} onSave={saveLead} onClose={() => setEditLead(null)} toast={toast} />}
+      {detailLead  && (
         <LeadDetail
           lead={detailLead}
           leads={leads}
@@ -807,10 +1000,13 @@ export default function App() {
           onEdit={l => { setDetailLead(null); setEditLead(l) }}
           onStageChange={stageChange}
           onLogAction={logAction}
+          toast={toast}
         />
       )}
-      {showAI && <AIPanel leads={leads} user={user} onClose={() => setShowAI(false)} />}
-      {showInvite && <InviteManager onClose={() => setShowInvite(false)} />}
+      {showAI      && <AIPanel leads={leads} user={user} onClose={() => setShowAI(false)} />}
+      {showInvite  && <InviteManager onClose={() => setShowInvite(false)} />}
+      {confetti    && <Confetti onDone={() => setConfetti(false)} />}
+      <ToastContainer toasts={toasts} />
     </div>
   )
 }
