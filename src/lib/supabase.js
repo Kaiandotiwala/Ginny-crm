@@ -83,6 +83,16 @@ export async function updateLeadStage(id, stage) {
   return { data, error }
 }
 
+export async function updateLeadHistory(id, history) {
+  const { data, error } = await supabase
+    .from('leads')
+    .update({ history, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  return { data, error }
+}
+
 // ── Reminders ─────────────────────────────────────────────────
 
 export async function fetchTodayReminders() {

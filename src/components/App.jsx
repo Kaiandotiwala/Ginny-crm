@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { supabase, fetchLeads, upsertLead, updateLeadStage, signOut } from '../lib/supabase'
+import { supabase, fetchLeads, upsertLead, deleteLead, updateLeadStage, updateLeadHistory, signOut } from '../lib/supabase'
 import InviteManager from './InviteManager'
 
 // ── Brand ─────────────────────────────────────────────────────
@@ -46,6 +46,11 @@ const SOURCES    = ['LinkedIn','Referral','Conference','Cold Outreach','Website'
 const fmtINR  = v => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v || 0)
 const getStage = id => STAGES.find(s => s.id === id) || STAGES[0]
 const today   = () => new Date().toISOString().split('T')[0]
+
+// Strip any fields that don't exist in the Supabase leads table before upsert.
+// This prevents "column does not exist" errors from crashing saves silently.
+const LEAD_COLS = new Set(['id','company','contact','email','phone','whatsapp','industry','value','stage','priority','source','notes','assigned_to','reminder_date','reminder_note','history','services'])
+const cleanLead = raw => Object.fromEntries(Object.entries(raw).filter(([k]) => LEAD_COLS.has(k)))
 
 // ── Claude API ────────────────────────────────────────────────
 async function callClaude(messages, system, maxTokens = 1000) {
@@ -327,7 +332,7 @@ Hot: ${leads.filter(l=>['negotiation','sow_pending'].includes(l.stage)).map(l=>`
 }
 
 // ── Lead Detail (bottom sheet, 5 tabs) ────────────────────────
-function LeadDetail({ lead: init, leads, onClose, onEdit, onStageChange, onLogAction, toast }) {
+function LeadDetail({ lead: init, leads, onClose, onEdit, onDelete, onStageChange, onLogAction, toast }) {
   const [tab, setTab] = useState('info')
   const lead = leads.find(l => l.id === init.id) || init
   const stage = getStage(lead.stage)
@@ -374,11 +379,9 @@ function LeadDetail({ lead: init, leads, onClose, onEdit, onStageChange, onLogAc
 
   const saveServices = async () => {
     setSavingSvc(true)
-    try {
-      const { error } = await upsertLead({ ...lead, services: svc })
-      if (error) throw error
-      toast('Services saved')
-    } catch { toast('Add a services column to Supabase to persist', 'error') }
+    const { error } = await upsertLead(cleanLead({ ...lead, services: svc }))
+    if (error) toast('Save failed: ' + error.message, 'error')
+    else toast('Services saved ✓')
     setSavingSvc(false)
   }
 
@@ -433,7 +436,10 @@ function LeadDetail({ lead: init, leads, onClose, onEdit, onStageChange, onLogAc
               )}
             </div>
             {lead.notes && <div style={{ background: BG, borderRadius: 10, padding: '12px 14px', fontSize: 13, color: TEXT, lineHeight: 1.65, marginBottom: 16 }}>{lead.notes}</div>}
-            <button onClick={() => onEdit(lead)} style={{ padding: '10px 22px', border: `1.5px solid ${LIME}`, color: BK, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>✎ Edit Lead</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => onEdit(lead)} style={{ padding: '10px 22px', border: `1.5px solid ${LIME}`, color: BK, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>✎ Edit Lead</button>
+              <button onClick={() => { if (window.confirm(`Delete ${lead.company}? This cannot be undone.`)) onDelete(lead.id) }} style={{ padding: '10px 18px', border: '1.5px solid #ef4444', color: '#ef4444', borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>🗑 Delete</button>
+            </div>
           </div>
         )}
 
@@ -597,7 +603,7 @@ function FormField({ label, value, onChange, type = 'text', opts }) {
 
 // ── Lead Form (bottom sheet) ───────────────────────────────────
 function LeadForm({ lead, onSave, onClose, toast }) {
-  const blank = { company: '', contact: '', email: '', phone: '', whatsapp: '', industry: 'Technology', value: '', currency: 'INR', stage: 'lead', priority: 'medium', source: '', notes: '', assigned_to: 'you', reminder_date: '', reminder_note: '', history: [] }
+  const blank = { company: '', contact: '', email: '', phone: '', whatsapp: '', industry: 'Technology', value: '', stage: 'lead', priority: 'medium', source: '', notes: '', assigned_to: 'you', reminder_date: '', reminder_note: '', history: [] }
   const [form, setForm] = useState(lead ? { ...lead, value: lead.value || '', reminder_date: lead.reminder_date || '', reminder_note: lead.reminder_note || '' } : blank)
   const [saving, setSaving] = useState(false)
   const set = useCallback((k, v) => setForm(f => ({ ...f, [k]: v })), [])
@@ -605,9 +611,9 @@ function LeadForm({ lead, onSave, onClose, toast }) {
   const save = async () => {
     if (!form.company || !form.contact || !form.email) return alert('Company, contact and email are required.')
     setSaving(true)
-    const payload = { ...form, value: Number(form.value) || 0 }
-    if (!payload.id) payload.history = [{ date: today(), action: 'Lead created' }]
-    const { data, error } = await upsertLead(payload)
+    const raw = { ...form, value: Number(form.value) || 0 }
+    if (!raw.id) raw.history = [{ date: today(), action: 'Lead created' }]
+    const { data, error } = await upsertLead(cleanLead(raw))
     if (error) { alert('Save failed: ' + error.message); setSaving(false); return }
     toast(lead ? 'Lead updated ✓' : 'Lead added ✓')
     onSave(data)
@@ -794,6 +800,14 @@ export default function App() {
     setEditLead(null)
   }
 
+  const handleDeleteLead = async (id) => {
+    const { error } = await deleteLead(id)
+    if (error) { toast('Delete failed: ' + error.message, 'error'); return }
+    setLeads(prev => prev.filter(l => l.id !== id))
+    setDetailLead(null)
+    toast('Lead deleted')
+  }
+
   const stageChange = async (id, stage) => {
     await updateLeadStage(id, stage)
     setLeads(prev => prev.map(l => l.id === id ? { ...l, stage } : l))
@@ -804,7 +818,7 @@ export default function App() {
     const lead = leads.find(l => l.id === id)
     if (!lead) return
     const history = [...(lead.history || []), { date: today(), action }]
-    await upsertLead({ ...lead, history })
+    await updateLeadHistory(id, history)
     setLeads(prev => prev.map(l => l.id === id ? { ...l, history } : l))
   }
 
@@ -1001,6 +1015,7 @@ export default function App() {
           leads={leads}
           onClose={() => setDetailLead(null)}
           onEdit={l => { setDetailLead(null); setEditLead(l) }}
+          onDelete={handleDeleteLead}
           onStageChange={stageChange}
           onLogAction={logAction}
           toast={toast}
