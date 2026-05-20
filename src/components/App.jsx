@@ -502,7 +502,7 @@ function LeadDetail({ lead: init, leads, onClose, onEdit, onStageChange, onLogAc
                 <button key={s.id} onClick={async () => {
                   await onStageChange(lead.id, s.id)
                   onLogAction(lead.id, `Moved to ${s.label}`)
-                  toast(`${s.emoji} Moved to ${s.label}`)
+                  if (s.id !== 'closed_won') toast(`${s.emoji} Moved to ${s.label}`)
                   onClose()
                 }}
                   style={{ padding: '10px 18px', border: `1.5px solid ${s.color}`, color: s.color, borderRadius: 22, background: s.bg, cursor: 'pointer', fontSize: 13, fontWeight: 600, fontFamily: 'Poppins, sans-serif' }}>
@@ -578,12 +578,29 @@ function LeadDetail({ lead: init, leads, onClose, onEdit, onStageChange, onLogAc
   )
 }
 
+// ── Form Field (module-level — must not be defined inside any component) ──
+const FIELD_ST = { width: '100%', padding: '9px 12px', border: `1.5px solid ${BORDER}`, borderRadius: 8, fontSize: 13, color: TEXT, boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif', outline: 'none' }
+
+function FormField({ label, value, onChange, type = 'text', opts }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 5 }}>{label}</label>
+      {opts?.select
+        ? <select value={value} onChange={onChange} style={FIELD_ST}>{opts.options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}</select>
+        : opts?.textarea
+          ? <textarea value={value} onChange={onChange} rows={3} style={{ ...FIELD_ST, resize: 'vertical' }} />
+          : <input type={type} value={value} onChange={onChange} style={FIELD_ST} />
+      }
+    </div>
+  )
+}
+
 // ── Lead Form (bottom sheet) ───────────────────────────────────
 function LeadForm({ lead, onSave, onClose, toast }) {
   const blank = { company: '', contact: '', email: '', phone: '', whatsapp: '', industry: 'Technology', value: '', currency: 'INR', stage: 'lead', priority: 'medium', source: '', notes: '', assigned_to: 'you', reminder_date: '', reminder_note: '', history: [] }
   const [form, setForm] = useState(lead ? { ...lead, value: lead.value || '', reminder_date: lead.reminder_date || '', reminder_note: lead.reminder_note || '' } : blank)
   const [saving, setSaving] = useState(false)
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const set = useCallback((k, v) => setForm(f => ({ ...f, [k]: v })), [])
 
   const save = async () => {
     if (!form.company || !form.contact || !form.email) return alert('Company, contact and email are required.')
@@ -597,39 +614,25 @@ function LeadForm({ lead, onSave, onClose, toast }) {
     setSaving(false)
   }
 
-  const inp = { width: '100%', padding: '9px 12px', border: `1.5px solid ${BORDER}`, borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif', outline: 'none' }
-
-  const F = ({ label, k, type = 'text', opts }) => (
-    <div style={{ marginBottom: 14 }}>
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: TEXT, marginBottom: 5 }}>{label}</label>
-      {opts?.select
-        ? <select value={form[k]} onChange={e => set(k, e.target.value)} style={inp}>{opts.options.map(o => <option key={o.value || o} value={o.value || o}>{o.label || o}</option>)}</select>
-        : opts?.textarea
-          ? <textarea value={form[k]} onChange={e => set(k, e.target.value)} rows={3} style={{ ...inp, resize: 'vertical' }} />
-          : <input type={type} value={form[k]} onChange={e => set(k, e.target.value)} style={inp} />
-      }
-    </div>
-  )
-
   return (
     <Sheet onClose={onClose} title={lead ? 'Edit Lead' : 'Add New Lead'}>
       <div style={{ padding: '20px 24px 36px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-          <F label="Company *" k="company" />
-          <F label="Contact Name *" k="contact" />
-          <F label="Email *" k="email" type="email" />
-          <F label="Phone" k="phone" type="tel" />
-          <F label="WhatsApp" k="whatsapp" type="tel" />
-          <F label="Industry" k="industry" opts={{ select: true, options: INDUSTRIES }} />
-          <F label="Deal Value (₹)" k="value" type="number" />
-          <F label="Stage" k="stage" opts={{ select: true, options: STAGES.map(s => ({ value: s.id, label: s.label })) }} />
-          <F label="Priority" k="priority" opts={{ select: true, options: ['critical', 'high', 'medium', 'low'] }} />
-          <F label="Assigned To" k="assigned_to" opts={{ select: true, options: TEAM.map(t => ({ value: t.id, label: t.name })) }} />
-          <F label="Lead Source" k="source" opts={{ select: true, options: ['', ...SOURCES] }} />
-          <F label="Reminder Date" k="reminder_date" type="date" />
+          <FormField label="Company *"      value={form.company}       onChange={e => set('company', e.target.value)} />
+          <FormField label="Contact Name *" value={form.contact}       onChange={e => set('contact', e.target.value)} />
+          <FormField label="Email *"        value={form.email}         onChange={e => set('email', e.target.value)}        type="email" />
+          <FormField label="Phone"          value={form.phone}         onChange={e => set('phone', e.target.value)}         type="tel" />
+          <FormField label="WhatsApp"       value={form.whatsapp}      onChange={e => set('whatsapp', e.target.value)}      type="tel" />
+          <FormField label="Industry"       value={form.industry}      onChange={e => set('industry', e.target.value)}      opts={{ select: true, options: INDUSTRIES }} />
+          <FormField label="Deal Value (₹)" value={form.value}         onChange={e => set('value', e.target.value)}         type="number" />
+          <FormField label="Stage"          value={form.stage}         onChange={e => set('stage', e.target.value)}         opts={{ select: true, options: STAGES.map(s => ({ value: s.id, label: s.label })) }} />
+          <FormField label="Priority"       value={form.priority}      onChange={e => set('priority', e.target.value)}      opts={{ select: true, options: ['critical', 'high', 'medium', 'low'] }} />
+          <FormField label="Assigned To"    value={form.assigned_to}   onChange={e => set('assigned_to', e.target.value)}   opts={{ select: true, options: TEAM.map(t => ({ value: t.id, label: t.name })) }} />
+          <FormField label="Lead Source"    value={form.source}        onChange={e => set('source', e.target.value)}        opts={{ select: true, options: ['', ...SOURCES] }} />
+          <FormField label="Reminder Date"  value={form.reminder_date} onChange={e => set('reminder_date', e.target.value)} type="date" />
         </div>
-        <F label="Reminder Note" k="reminder_note" opts={{ textarea: true }} />
-        <F label="Notes" k="notes" opts={{ textarea: true }} />
+        <FormField label="Reminder Note" value={form.reminder_note} onChange={e => set('reminder_note', e.target.value)} opts={{ textarea: true }} />
+        <FormField label="Notes"         value={form.notes}         onChange={e => set('notes', e.target.value)}         opts={{ textarea: true }} />
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ padding: '11px 22px', border: `1.5px solid ${BORDER}`, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 14, fontFamily: 'Poppins, sans-serif' }}>Cancel</button>
           <button onClick={save} disabled={saving} style={{ padding: '11px 28px', background: LIME, color: BK, border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 700, fontFamily: 'Poppins, sans-serif', opacity: saving ? 0.7 : 1 }}>
