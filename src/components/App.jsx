@@ -609,7 +609,9 @@ function LeadForm({ lead, onSave, onClose, toast }) {
   const set = useCallback((k, v) => setForm(f => ({ ...f, [k]: v })), [])
 
   const save = async () => {
-    if (!form.company || !form.contact || !form.email) return alert('Company, contact and email are required.')
+    if (!form.company.trim()) return alert('Company name is required.')
+    if (!form.contact.trim()) return alert('Contact name is required.')
+    if (!form.email.trim() && !form.phone.trim()) return alert('Please enter at least an email or phone number.')
     setSaving(true)
     const raw = { ...form, value: Number(form.value) || 0 }
     if (!raw.id) raw.history = [{ date: today(), action: 'Lead created' }]
