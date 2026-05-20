@@ -331,7 +331,324 @@ Hot: ${leads.filter(l=>['negotiation','sow_pending'].includes(l.stage)).map(l=>`
   )
 }
 
-// ── Lead Detail (bottom sheet, 5 tabs) ────────────────────────
+// ── Gmail helpers ─────────────────────────────────────────────
+function getHeader(headers = [], name) {
+  return headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || ''
+}
+
+function decodeGmailBody(part) {
+  if (!part) return ''
+  if (part.body?.data) {
+    try { return atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/')) } catch { return '' }
+  }
+  if (part.parts) {
+    const plain = part.parts.find(p => p.mimeType === 'text/plain') || part.parts[0]
+    return decodeGmailBody(plain)
+  }
+  return ''
+}
+
+function stripHtml(html) {
+  return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+             .replace(/<[^>]+>/g, ' ')
+             .replace(/\s{2,}/g, ' ')
+             .trim()
+}
+
+function gmailThreadSubject(thread) {
+  return getHeader(thread?.messages?.[0]?.payload?.headers || [], 'Subject') || '(no subject)'
+}
+
+function fmtEmailDate(internalDate) {
+  if (!internalDate) return ''
+  const d = new Date(Number(internalDate))
+  const now = new Date()
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'short',
+    ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+  })
+}
+
+function buildDraftReply(lead, thread, svc) {
+  const firstName = (lead.contact || '').split(' ')[0] || lead.contact
+  const subject   = gmailThreadSubject(thread)
+  const activeServices = svc
+    ? SERVICES.filter(s => svc[s.id]?.enabled).map(s => s.label)
+    : []
+  const servicesLine = activeServices.length
+    ? `\n\nAs a quick note — we've been discussing the following for ${lead.company}: ${activeServices.join(', ')}.`
+    : ''
+
+  const stageLines = {
+    sow_pending:   `I wanted to follow up on the Scope of Work / SLA we sent across. Please let me know if you have any questions — we're ready to get started as soon as you're able to sign off.`,
+    negotiation:   `I'm following up to see if you have any further thoughts on our proposal. Happy to jump on a quick call to address any concerns — we want to make sure this feels right for ${lead.company}.`,
+    quotation:     `I wanted to check in on the quotation we sent over. Do let me know if you'd like to walk through any part of it — we'd love to move this forward.`,
+    onboarding:    `I'm reaching out to make sure everything is going smoothly with the onboarding. Please flag anything at all and we'll sort it straight away.`,
+    prospect:      `I'd love to explore how Ginny can support ${lead.company}. Would you be open to a brief call this week?`,
+    closed_won:    `It's been great working with ${lead.company}! I wanted to touch base — please don't hesitate to reach out if there's anything we can do better.`,
+    closed_lost:   `I wanted to check in and see if circumstances have changed. We'd love the opportunity to work together when the time is right.`,
+  }
+  const body = stageLines[lead.stage] || `I'm following up on our recent conversation. Please let me know if there's anything I can help clarify or move forward.`
+
+  return `Hi ${firstName},\n\nHope you're doing well!\n\n${body}${servicesLine}\n\nRe: ${subject}\n\nLooking forward to hearing from you.\n\nBest regards,\nGinny Sales Team`
+}
+
+// ── Gmail Tab ──────────────────────────────────────────────────
+function GmailTab({ lead, svc, toast }) {
+  const [token, setToken] = useState(() => {
+    const t = localStorage.getItem('gmail_token')
+    const exp = Number(localStorage.getItem('gmail_token_expiry') || 0)
+    return t && Date.now() < exp ? t : null
+  })
+  const [threads,        setThreads]        = useState([])
+  const [loading,        setLoading]        = useState(false)
+  const [selectedThread, setSelectedThread] = useState(null)
+  const [threadLoading,  setThreadLoading]  = useState(false)
+  const [draft,          setDraft]          = useState('')
+  const [showDraft,      setShowDraft]      = useState(false)
+  const [gisReady,       setGisReady]       = useState(!!window.google?.accounts?.oauth2)
+  const clientRef = useRef(null)
+
+  // Load Google Identity Services script once
+  useEffect(() => {
+    if (window.google?.accounts?.oauth2) return
+    const existing = document.querySelector('script[src*="accounts.google.com/gsi"]')
+    if (existing) {
+      const id = setInterval(() => {
+        if (window.google?.accounts?.oauth2) { clearInterval(id); setGisReady(true) }
+      }, 100)
+      return () => clearInterval(id)
+    }
+    const s = document.createElement('script')
+    s.src = 'https://accounts.google.com/gsi/client'
+    s.async = true
+    s.onload = () => setGisReady(true)
+    document.head.appendChild(s)
+  }, [])
+
+  // Init OAuth token client once GIS is ready
+  useEffect(() => {
+    if (!gisReady || !import.meta.env.VITE_GOOGLE_CLIENT_ID) return
+    clientRef.current = window.google.accounts.oauth2.initTokenClient({
+      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+      callback: resp => {
+        if (resp.error) { toast('Google auth error: ' + resp.error, 'error'); return }
+        const expiry = Date.now() + (resp.expires_in || 3600) * 1000
+        localStorage.setItem('gmail_token', resp.access_token)
+        localStorage.setItem('gmail_token_expiry', String(expiry))
+        setToken(resp.access_token)
+      },
+    })
+  }, [gisReady])
+
+  // Auto-fetch threads when token is available
+  useEffect(() => { if (token) doFetch(token) }, [token])
+
+  const doFetch = async (t) => {
+    if (!lead.email) return
+    setLoading(true); setSelectedThread(null)
+    try {
+      const q = `from:${lead.email} OR to:${lead.email}`
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(q)}&maxResults=25`,
+        { headers: { Authorization: `Bearer ${t}` } }
+      )
+      if (res.status === 401) { doSignOut(); setLoading(false); return }
+      const list = await res.json()
+      if (list.error) throw new Error(list.error.message)
+
+      const details = await Promise.all((list.threads || []).map(th =>
+        fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/threads/${th.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+          { headers: { Authorization: `Bearer ${t}` } }
+        ).then(r => r.json())
+      ))
+      setThreads(details.filter(d => !d.error))
+    } catch (e) { toast('Gmail: ' + e.message, 'error') }
+    setLoading(false)
+  }
+
+  const openThread = async (id) => {
+    setThreadLoading(true); setShowDraft(false); setDraft('')
+    try {
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}?format=full`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      const data = await res.json()
+      if (data.error) throw new Error(data.error.message)
+      setSelectedThread(data)
+    } catch (e) { toast('Could not load thread: ' + e.message, 'error') }
+    setThreadLoading(false)
+  }
+
+  const doSignOut = () => {
+    if (token) window.google?.accounts?.oauth2?.revoke(token, () => {})
+    localStorage.removeItem('gmail_token')
+    localStorage.removeItem('gmail_token_expiry')
+    setToken(null); setThreads([]); setSelectedThread(null)
+  }
+
+  // Missing Client ID
+  if (!import.meta.env.VITE_GOOGLE_CLIENT_ID) return (
+    <div style={{ textAlign: 'center', padding: '36px 16px', color: MUTED, fontSize: 13, lineHeight: 1.7 }}>
+      Add <code style={{ background: BG, padding: '2px 6px', borderRadius: 4 }}>VITE_GOOGLE_CLIENT_ID</code> to your Vercel environment variables to enable Gmail integration.
+    </div>
+  )
+
+  // No email on lead
+  if (!lead.email) return (
+    <div style={{ textAlign: 'center', padding: '36px 16px', color: MUTED, fontSize: 13 }}>
+      No email address on this lead — add one to search Gmail.
+    </div>
+  )
+
+  // Not authenticated
+  if (!token) return (
+    <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+      <div style={{ fontSize: 36, marginBottom: 12 }}>📧</div>
+      <div style={{ fontWeight: 700, fontSize: 16, color: TEXT, marginBottom: 6 }}>Connect Gmail</div>
+      <div style={{ fontSize: 13, color: MUTED, marginBottom: 28 }}>
+        Find all emails with <strong>{lead.email}</strong>
+      </div>
+      <button
+        onClick={() => clientRef.current?.requestAccessToken()}
+        style={{ padding: '12px 30px', background: BK, color: WHITE, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}>
+        Sign in with Google
+      </button>
+    </div>
+  )
+
+  // Full thread view
+  if (threadLoading) return (
+    <div style={{ textAlign: 'center', padding: '48px 0', color: MUTED, fontSize: 13 }}>Loading thread…</div>
+  )
+
+  if (selectedThread) {
+    const subject = gmailThreadSubject(selectedThread)
+    return (
+      <div>
+        <button onClick={() => { setSelectedThread(null); setShowDraft(false); setDraft('') }}
+          style={{ background: 'none', border: 'none', color: LIME, cursor: 'pointer', fontSize: 13, fontWeight: 600, marginBottom: 16, padding: 0, fontFamily: 'Poppins, sans-serif' }}>
+          ← Back to threads
+        </button>
+        <div style={{ fontWeight: 700, fontSize: 15, color: TEXT, marginBottom: 18 }}>{subject}</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+          {selectedThread.messages?.map(msg => {
+            const h    = msg.payload?.headers || []
+            const from = getHeader(h, 'From')
+            const date = fmtEmailDate(msg.internalDate)
+            const raw  = decodeGmailBody(msg.payload)
+            const body = raw.includes('<') ? stripHtml(raw) : raw
+            return (
+              <div key={msg.id} style={{ border: `1px solid ${BORDER}`, borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ padding: '10px 14px', background: BG, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: TEXT }}>{from}</span>
+                  <span style={{ fontSize: 11, color: MUTED, flexShrink: 0 }}>{date}</span>
+                </div>
+                <div style={{ padding: '12px 14px', fontSize: 12, color: TEXT, lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 220, overflowY: 'auto', wordBreak: 'break-word' }}>
+                  {body.trim() || '(No readable content)'}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {!showDraft && (
+          <button
+            onClick={() => { setDraft(buildDraftReply(lead, selectedThread, svc)); setShowDraft(true) }}
+            style={{ padding: '10px 22px', background: BK, color: WHITE, border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'Poppins, sans-serif' }}>
+            ✦ Draft Reply
+          </button>
+        )}
+
+        {showDraft && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: TEXT, marginBottom: 8 }}>Suggested Reply</div>
+            <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={10}
+              style={{ width: '100%', padding: 12, border: `1.5px solid ${BORDER}`, borderRadius: 12, fontSize: 13, lineHeight: 1.65, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'Poppins, sans-serif', color: TEXT }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => navigator.clipboard.writeText(draft)}
+                style={{ padding: '9px 16px', border: `1.5px solid ${BORDER}`, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontFamily: 'Poppins, sans-serif' }}>
+                ⧉ Copy
+              </button>
+              <a href={`https://mail.google.com/mail/u/0/#inbox/${selectedThread.id}`}
+                target="_blank" rel="noreferrer"
+                style={{ padding: '9px 16px', background: '#ea4335', color: WHITE, borderRadius: 10, fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+                Open in Gmail
+              </a>
+              <button onClick={() => setDraft(buildDraftReply(lead, selectedThread, svc))}
+                style={{ padding: '9px 14px', border: `1.5px solid ${BORDER}`, borderRadius: 10, background: WHITE, cursor: 'pointer', fontSize: 13, fontFamily: 'Poppins, sans-serif' }}>
+                ↺ Reset
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Thread list view
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: MUTED }}>
+          {loading ? 'Searching Gmail…' : `${threads.length} thread${threads.length !== 1 ? 's' : ''} with ${lead.email}`}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => doFetch(token)} disabled={loading}
+            style={{ padding: '6px 12px', border: `1px solid ${BORDER}`, borderRadius: 8, background: WHITE, cursor: loading ? 'not-allowed' : 'pointer', fontSize: 12, fontFamily: 'Poppins, sans-serif', opacity: loading ? 0.5 : 1 }}>
+            ↺ Refresh
+          </button>
+          <button onClick={doSignOut}
+            style={{ padding: '6px 12px', border: `1px solid ${BORDER}`, borderRadius: 8, background: WHITE, cursor: 'pointer', fontSize: 12, color: MUTED, fontFamily: 'Poppins, sans-serif' }}>
+            Sign out
+          </button>
+        </div>
+      </div>
+
+      {loading && <div style={{ textAlign: 'center', padding: '40px 0', color: MUTED, fontSize: 13 }}>Searching Gmail…</div>}
+
+      {!loading && threads.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: MUTED, fontSize: 13 }}>No emails found with {lead.email}</div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {threads.map(thread => {
+          const lastMsg = thread.messages?.[thread.messages.length - 1]
+          const subject = getHeader(thread.messages?.[0]?.payload?.headers || [], 'Subject') || '(no subject)'
+          const from    = getHeader(lastMsg?.payload?.headers || [], 'From')
+          const date    = fmtEmailDate(lastMsg?.internalDate)
+          const count   = thread.messages?.length || 0
+          return (
+            <div key={thread.id} onClick={() => openThread(thread.id)}
+              style={{ border: `1px solid ${BORDER}`, borderRadius: 12, padding: '12px 16px', cursor: 'pointer', background: WHITE, transition: 'border-color 0.15s, box-shadow 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = LIME; e.currentTarget.style.boxShadow = `0 2px 12px ${LIME}22` }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.boxShadow = 'none' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: TEXT, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subject}</div>
+                <div style={{ fontSize: 11, color: MUTED, flexShrink: 0 }}>{date}</div>
+              </div>
+              <div style={{ fontSize: 12, color: MUTED }}>
+                {from}
+                {count > 1 && <span style={{ marginLeft: 8, background: BG, borderRadius: 8, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{count}</span>}
+              </div>
+              {thread.snippet && (
+                <div style={{ fontSize: 11, color: '#bbb', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.snippet}</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Lead Detail (bottom sheet, 6 tabs) ────────────────────────
 function LeadDetail({ lead: init, leads, onClose, onEdit, onDelete, onStageChange, onLogAction, toast }) {
   const [tab, setTab] = useState('info')
   const lead = leads.find(l => l.id === init.id) || init
@@ -390,6 +707,7 @@ function LeadDetail({ lead: init, leads, onClose, onEdit, onDelete, onStageChang
     { id: 'services', label: '💼 Services' },
     { id: 'move',     label: '→ Stage' },
     { id: 'send',     label: '✉ Send' },
+    { id: 'emails',   label: '📧 Emails' },
     { id: 'history',  label: 'History' },
   ]
 
@@ -560,6 +878,9 @@ function LeadDetail({ lead: init, leads, onClose, onEdit, onDelete, onStageChang
             )}
           </div>
         )}
+
+        {/* Emails */}
+        {tab === 'emails' && <GmailTab lead={lead} svc={svc} toast={toast} />}
 
         {/* History */}
         {tab === 'history' && (
